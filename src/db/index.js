@@ -96,6 +96,32 @@ class Db {
   }
 
   /**
+   * Returns all page URLs for a session (any status).
+   * Used to seed the `seen` set on resume.
+   * @param {number} sessionId
+   * @returns {string[]}
+   */
+  getAllPageUrls(sessionId) {
+    return this.db
+      .prepare('SELECT url FROM pages WHERE session_id = ?')
+      .all(sessionId)
+      .map((r) => r.url);
+  }
+
+  /**
+   * Returns all distinct link target URLs discovered during a session.
+   * Used alongside getAllPageUrls to fully seed `seen` on resume.
+   * @param {number} sessionId
+   * @returns {string[]}
+   */
+  getLinkTargetUrls(sessionId) {
+    return this.db
+      .prepare('SELECT DISTINCT target_url FROM links WHERE session_id = ?')
+      .all(sessionId)
+      .map((r) => r.target_url);
+  }
+
+  /**
    * Inserts a page into the queue. Does nothing if the URL already exists for this session.
    * @param {number} sessionId
    * @param {{ url: string, status?: string, depth?: number, in_sitemap?: number }} page
