@@ -5,10 +5,15 @@
   "main": "src/crawler.js",
   "scripts": {
     "crawl": "node src/crawler.js",
-    "report": "node src/report.js"
+    "report": "node src/report.js",
+    "test": "node --test tests/**/*.test.js",
+    "lint": "eslint .",
+    "format": "prettier --write ."
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   },
   "dependencies": {
     "axios": "^1.13.5",
@@ -17,5 +22,12 @@
     "fast-csv": "^5.0.5",
     "robots-parser": "^3.0.1",
     "sitemapper": "^4.1.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "globals": "^17.3.0",
+    "prettier": "^3.8.1"
   }
 }
