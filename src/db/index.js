@@ -39,9 +39,9 @@ class Db {
    * @returns {number} The ID of the newly created session.
    */
   createSession(siteUrl, label) {
-    const result = this.db.prepare(
-      'INSERT INTO sessions (site_url, label) VALUES (?, ?)'
-    ).run(siteUrl, label || null);
+    const result = this.db
+      .prepare('INSERT INTO sessions (site_url, label) VALUES (?, ?)')
+      .run(siteUrl, label || null);
     return result.lastInsertRowid;
   }
 
@@ -53,14 +53,18 @@ class Db {
    */
   updateSessionStatus(sessionId, status) {
     if (status === 'complete' || status === 'interrupted') {
-      const { count } = this.db.prepare(
-        `SELECT COUNT(*) AS count FROM pages WHERE session_id = ? AND status = 'crawled'`
-      ).get(sessionId);
-      this.db.prepare(`
+      const { count } = this.db
+        .prepare(`SELECT COUNT(*) AS count FROM pages WHERE session_id = ? AND status = 'crawled'`)
+        .get(sessionId);
+      this.db
+        .prepare(
+          `
         UPDATE sessions
         SET status = ?, completed_at = datetime('now'), total_pages = ?
         WHERE id = ?
-      `).run(status, count, sessionId);
+      `
+        )
+        .run(status, count, sessionId);
     } else {
       this.db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run(status, sessionId);
     }
@@ -71,12 +75,16 @@ class Db {
    * @returns {{ id: number, site_url: string, label: string, status: string } | undefined}
    */
   getLatestInterruptedSession() {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT * FROM sessions
       WHERE status = 'interrupted'
       ORDER BY id DESC
       LIMIT 1
-    `).get();
+    `
+      )
+      .get();
   }
 
   /**
@@ -93,11 +101,15 @@ class Db {
    * @param {{ url: string, status?: string, depth?: number, in_sitemap?: number }} page
    */
   upsertPage(sessionId, { url, status = 'pending', depth = 0, in_sitemap = 0 }) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       INSERT INTO pages (session_id, url, status, depth, in_sitemap)
       VALUES (?, ?, ?, ?, ?)
       ON CONFLICT(session_id, url) DO NOTHING
-    `).run(sessionId, url, status, depth, in_sitemap);
+    `
+      )
+      .run(sessionId, url, status, depth, in_sitemap);
   }
 
   /**
@@ -106,11 +118,15 @@ class Db {
    * @returns {Array<{ url: string, depth: number }>}
    */
   getPendingUrls(sessionId) {
-    return this.db.prepare(`
+    return this.db
+      .prepare(
+        `
       SELECT url, depth FROM pages
       WHERE session_id = ? AND status = 'pending'
       ORDER BY depth ASC
-    `).all(sessionId);
+    `
+      )
+      .all(sessionId);
   }
 
   /**
@@ -120,7 +136,9 @@ class Db {
    * @param {Object} data - Fields matching the pages table columns (see schema.sql).
    */
   markPageCrawled(sessionId, url, data) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE pages SET
         status              = 'crawled',
         crawled_at          = datetime('now'),
@@ -147,7 +165,9 @@ class Db {
         response_time_ms    = @response_time_ms,
         page_size_bytes     = @page_size_bytes
       WHERE session_id = @session_id AND url = @url
-    `).run({ ...data, session_id: sessionId, url });
+    `
+      )
+      .run({ ...data, session_id: sessionId, url });
   }
 
   /**
@@ -158,11 +178,15 @@ class Db {
    * @param {string|null} errorMessage
    */
   markPageError(sessionId, url, statusCode, errorMessage) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE pages
       SET status = 'error', status_code = ?, error_message = ?, crawled_at = datetime('now')
       WHERE session_id = ? AND url = ?
-    `).run(statusCode || null, errorMessage || null, sessionId, url);
+    `
+      )
+      .run(statusCode || null, errorMessage || null, sessionId, url);
   }
 
   /**
@@ -172,11 +196,15 @@ class Db {
    * @param {string} [reason] - Human-readable explanation.
    */
   markPageSkipped(sessionId, url, reason) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE pages
       SET status = 'skipped', error_message = ?
       WHERE session_id = ? AND url = ?
-    `).run(reason || null, sessionId, url);
+    `
+      )
+      .run(reason || null, sessionId, url);
   }
 
   /**
@@ -190,7 +218,13 @@ class Db {
     );
     this.db.transaction((rows) => {
       for (const link of rows) {
-        stmt.run(sessionId, link.source_url, link.target_url, link.anchor_text || null, link.is_external ? 1 : 0);
+        stmt.run(
+          sessionId,
+          link.source_url,
+          link.target_url,
+          link.anchor_text || null,
+          link.is_external ? 1 : 0
+        );
       }
     })(links);
   }

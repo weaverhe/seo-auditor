@@ -3,6 +3,7 @@
 Project-specific conventions for AI coding agents.
 
 ## Package Manager
+
 - Always use **pnpm** — never npm or yarn.
   - Install deps: `pnpm install`
   - Add a package: `pnpm add <pkg>`

@@ -21,12 +21,12 @@ Copy `.env.example` to `.env` and adjust as needed:
 cp .env.example .env
 ```
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `CONCURRENCY` | `3` | Parallel page fetches |
-| `REQUEST_TIMEOUT_MS` | `15000` | Per-request timeout in ms |
-| `USER_AGENT` | `SEO-Audit-Bot/1.0` | User-agent string sent with requests |
-| `RESPECT_CRAWL_DELAY` | `true` | Honor crawl-delay from robots.txt |
+| Variable              | Default             | Description                          |
+| --------------------- | ------------------- | ------------------------------------ |
+| `CONCURRENCY`         | `3`                 | Parallel page fetches                |
+| `REQUEST_TIMEOUT_MS`  | `15000`             | Per-request timeout in ms            |
+| `USER_AGENT`          | `SEO-Audit-Bot/1.0` | User-agent string sent with requests |
+| `RESPECT_CRAWL_DELAY` | `true`              | Honor crawl-delay from robots.txt    |
 
 ## Usage
 

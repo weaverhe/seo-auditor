@@ -121,12 +121,28 @@ test('updateSessionStatus complete sets total_pages and completed_at', () => {
   const url = `${SITE_URL}/done`;
   db.upsertPage(sid, { url, depth: 0 });
   db.markPageCrawled(sid, url, {
-    status_code: 200, title: null, title_length: null, meta_description: null,
-    meta_desc_length: null, redirect_url: null, content_type: 'text/html',
-    h1: null, h1_count: 0, h2_count: 0, canonical_url: null, robots_directive: null,
-    x_robots_tag: null, is_indexable: 1, word_count: 0, internal_link_count: 0,
-    external_link_count: 0, image_count: 0, images_missing_alt: 0, has_schema: 0,
-    response_time_ms: 100, page_size_bytes: 512,
+    status_code: 200,
+    title: null,
+    title_length: null,
+    meta_description: null,
+    meta_desc_length: null,
+    redirect_url: null,
+    content_type: 'text/html',
+    h1: null,
+    h1_count: 0,
+    h2_count: 0,
+    canonical_url: null,
+    robots_directive: null,
+    x_robots_tag: null,
+    is_indexable: 1,
+    word_count: 0,
+    internal_link_count: 0,
+    external_link_count: 0,
+    image_count: 0,
+    images_missing_alt: 0,
+    has_schema: 0,
+    response_time_ms: 100,
+    page_size_bytes: 512,
   });
   db.updateSessionStatus(sid, 'complete');
   const session = db.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sid);
@@ -146,8 +162,18 @@ test('getLatestInterruptedSession returns most recent interrupted session', () =
 test('insertLinks bulk inserts within a transaction', () => {
   const sid = db.createSession(SITE_URL, 'links-test');
   db.insertLinks(sid, [
-    { source_url: `${SITE_URL}/`, target_url: `${SITE_URL}/about`, anchor_text: 'About', is_external: false },
-    { source_url: `${SITE_URL}/`, target_url: 'https://other.com', anchor_text: 'External', is_external: true },
+    {
+      source_url: `${SITE_URL}/`,
+      target_url: `${SITE_URL}/about`,
+      anchor_text: 'About',
+      is_external: false,
+    },
+    {
+      source_url: `${SITE_URL}/`,
+      target_url: 'https://other.com',
+      anchor_text: 'External',
+      is_external: true,
+    },
   ]);
   const links = db.db.prepare('SELECT * FROM links WHERE session_id = ?').all(sid);
   assert.equal(links.length, 2);
