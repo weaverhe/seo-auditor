@@ -23,12 +23,15 @@ class Db {
     this.db.pragma('journal_mode = WAL');
     this.db.pragma('foreign_keys = ON');
     this.db.exec(schema);
+    this.closed = false;
   }
 
   /**
    * Closes the database connection. Call this when the crawl is complete.
    */
   close() {
+    if (this.closed) return;
+    this.closed = true;
     this.db.close();
   }
 
@@ -123,6 +126,10 @@ class Db {
 
   /**
    * Inserts a page into the queue. Does nothing if the URL already exists for this session.
+   * ON CONFLICT DO NOTHING means the first insertion wins — depth and in_sitemap are not
+   * updated on duplicates. In practice, sitemap URLs are seeded before crawling begins so
+   * they get in_sitemap=1 and depth=0. Link-discovered URLs inserted later are silently
+   * ignored if already present.
    * @param {number} sessionId
    * @param {{ url: string, status?: string, depth?: number, in_sitemap?: number }} page
    */
@@ -157,41 +164,23 @@ class Db {
 
   /**
    * Marks a page as crawled and writes all extracted SEO data.
+   * The SET clause is built dynamically from the keys of `data`, so whatever fields
+   * emptyPage() (in crawler.js) defines are automatically written — no manual sync needed.
    * @param {number} sessionId
    * @param {string} url
    * @param {Object} data - Fields matching the pages table columns (see schema.sql).
    */
   markPageCrawled(sessionId, url, data) {
+    const setClause = Object.keys(data)
+      .map((col) => `${col} = @${col}`)
+      .join(',\n        ');
     this.db
       .prepare(
-        `
-      UPDATE pages SET
-        status              = 'crawled',
-        crawled_at          = datetime('now'),
-        status_code         = @status_code,
-        redirect_url        = @redirect_url,
-        content_type        = @content_type,
-        title               = @title,
-        title_length        = @title_length,
-        meta_description    = @meta_description,
-        meta_desc_length    = @meta_desc_length,
-        h1                  = @h1,
-        h1_count            = @h1_count,
-        h2_count            = @h2_count,
-        canonical_url       = @canonical_url,
-        robots_directive    = @robots_directive,
-        x_robots_tag        = @x_robots_tag,
-        is_indexable        = @is_indexable,
-        word_count          = @word_count,
-        internal_link_count = @internal_link_count,
-        external_link_count = @external_link_count,
-        image_count         = @image_count,
-        images_missing_alt  = @images_missing_alt,
-        has_schema          = @has_schema,
-        response_time_ms    = @response_time_ms,
-        page_size_bytes     = @page_size_bytes
-      WHERE session_id = @session_id AND url = @url
-    `
+        `UPDATE pages SET
+        status     = 'crawled',
+        crawled_at = datetime('now'),
+        ${setClause}
+      WHERE session_id = @session_id AND url = @url`
       )
       .run({ ...data, session_id: sessionId, url });
   }
@@ -206,13 +195,11 @@ class Db {
   markPageError(sessionId, url, statusCode, errorMessage) {
     this.db
       .prepare(
-        `
-      UPDATE pages
-      SET status = 'error', status_code = ?, error_message = ?, crawled_at = datetime('now')
-      WHERE session_id = ? AND url = ?
-    `
+        `UPDATE pages
+      SET status = 'error', status_code = @status_code, error_message = @error_message, crawled_at = datetime('now')
+      WHERE session_id = @session_id AND url = @url`
       )
-      .run(statusCode || null, errorMessage || null, sessionId, url);
+      .run({ session_id: sessionId, url, status_code: statusCode || null, error_message: errorMessage || null });
   }
 
   /**
@@ -224,13 +211,29 @@ class Db {
   markPageSkipped(sessionId, url, reason) {
     this.db
       .prepare(
-        `
-      UPDATE pages
-      SET status = 'skipped', error_message = ?
-      WHERE session_id = ? AND url = ?
-    `
+        `UPDATE pages
+      SET status = 'skipped', error_message = @error_message
+      WHERE session_id = @session_id AND url = @url`
       )
-      .run(reason || null, sessionId, url);
+      .run({ session_id: sessionId, url, error_message: reason || null });
+  }
+
+  /**
+   * Atomically persists a crawled page's SEO data alongside its links and images.
+   * Wraps markPageCrawled + insertLinks + insertImages in a single transaction so a
+   * crash between them can't leave a page marked crawled with no links/images recorded.
+   * @param {number} sessionId
+   * @param {string} url
+   * @param {Object} pageData - Passed directly to markPageCrawled.
+   * @param {Array} [links]
+   * @param {Array} [images]
+   */
+  persistPageResult(sessionId, url, pageData, links = [], images = []) {
+    this.db.transaction(() => {
+      this.markPageCrawled(sessionId, url, pageData);
+      if (links.length > 0) this.insertLinks(sessionId, links);
+      if (images.length > 0) this.insertImages(sessionId, images);
+    })();
   }
 
   /**

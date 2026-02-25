@@ -2,8 +2,6 @@
 
 const Sitemapper = require('sitemapper').default;
 
-const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 10);
-
 /**
  * Fetches all URLs from a site's sitemap(s).
  * Uses sitemap URLs from robots.txt if provided, otherwise tries /sitemap.xml.
@@ -11,10 +9,12 @@ const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 1
  * Returns an empty array if no sitemap is found or all fetches fail.
  * @param {string} siteUrl - Root URL, e.g. 'https://example.com'
  * @param {string[]} [robotsSitemapUrls] - Sitemap URLs discovered from robots.txt
+ * @param {{ requestTimeoutMs?: number }} [config]
  * @returns {Promise<string[]>}
  */
-async function getUrls(siteUrl, robotsSitemapUrls = []) {
-  const sitemapper = new Sitemapper({ timeout: REQUEST_TIMEOUT_MS });
+async function getUrls(siteUrl, robotsSitemapUrls = [], config = {}) {
+  const timeout = config.requestTimeoutMs || 15000;
+  const sitemapper = new Sitemapper({ timeout });
 
   const candidates =
     robotsSitemapUrls.length > 0 ? robotsSitemapUrls : [new URL('/sitemap.xml', siteUrl).href];
@@ -25,8 +25,8 @@ async function getUrls(siteUrl, robotsSitemapUrls = []) {
     try {
       const { sites } = await sitemapper.fetch(url);
       for (const site of sites) allUrls.add(site);
-    } catch {
-      // individual sitemap fetch failure — continue with others
+    } catch (err) {
+      console.warn(`Sitemap fetch failed for ${url}: ${err.message}`);
     }
   }
 

@@ -62,7 +62,9 @@ function analyze(html, headers, url) {
   const links = [];
   $('a[href]').each((_, el) => {
     const raw = $(el).attr('href')?.trim();
-    if (!raw || /^(mailto:|tel:|javascript:|#$)/.test(raw)) return;
+    // Skip protocol-less links and any fragment-only href (bare # or #section-id).
+    // Note: sites using <base href> will have relative URLs misresolved here — TODO if needed.
+    if (!raw || /^(mailto:|tel:|javascript:|#)/.test(raw)) return;
 
     let targetUrl;
     try {
@@ -100,7 +102,10 @@ function analyze(html, headers, url) {
   });
 
   const image_count = images.length;
-  const images_missing_alt = images.filter((img) => !img.alt).length;
+  // images_missing_alt: alt attribute absent entirely (SEO/a11y issue)
+  // images_empty_alt:   alt="" explicitly set (typically decorative — less critical)
+  const images_missing_alt = images.filter((img) => img.alt === null).length;
+  const images_empty_alt = images.filter((img) => img.alt === '').length;
 
   return {
     title,
@@ -120,6 +125,7 @@ function analyze(html, headers, url) {
     external_link_count,
     image_count,
     images_missing_alt,
+    images_empty_alt,
     links,
     images,
   };

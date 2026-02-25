@@ -219,7 +219,7 @@ function cleanupCrawlDb(label) {
 }
 
 function mockDeps(pages = {}) {
-  mock.method(robots, 'fetch', async () => ({
+  mock.method(robots, 'fetchRobots', async () => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],
@@ -234,7 +234,7 @@ function mockDeps(pages = {}) {
 
 test('crawl(): crawls all sitemap URLs and homepage', async () => {
   const site = crawlSiteUrl('sitemap');
-  mock.method(robots, 'fetch', async () => ({
+  mock.method(robots, 'fetchRobots', async () => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],
@@ -316,14 +316,14 @@ test('crawl(): resumes interrupted session and crawls remaining pending pages', 
     title: 'Done', title_length: 4, meta_description: null, meta_desc_length: null,
     h1: null, h1_count: 0, h2_count: 0, canonical_url: null, robots_directive: null,
     x_robots_tag: null, is_indexable: 1, word_count: 1, internal_link_count: 0,
-    external_link_count: 0, image_count: 0, images_missing_alt: 0, has_schema: 0,
+    external_link_count: 0, image_count: 0, images_missing_alt: 0, images_empty_alt: 0, has_schema: 0,
     response_time_ms: 100, page_size_bytes: 100,
   });
   setupDb.upsertPage(sid, { url: `${site}/pending`, depth: 0 });
   setupDb.updateSessionStatus(sid, 'interrupted');
   setupDb.close();
 
-  mock.method(robots, 'fetch', async () => ({
+  mock.method(robots, 'fetchRobots', async () => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],

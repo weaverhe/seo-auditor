@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS pages (
   internal_link_count INTEGER,
   external_link_count INTEGER,
   image_count         INTEGER,
-  images_missing_alt  INTEGER,
+  images_missing_alt  INTEGER,    -- alt attribute absent entirely
+  images_empty_alt    INTEGER,    -- alt attribute present but empty string (decorative)
   has_schema          INTEGER,
   response_time_ms    INTEGER,
   page_size_bytes     INTEGER,

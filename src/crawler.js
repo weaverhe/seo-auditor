@@ -5,20 +5,7 @@ const { analyze } = require('./analyze');
 const robots = require('./robots');
 const sitemap = require('./sitemap');
 const Db = require('./db');
-
-/**
- * Reads crawler configuration from process.env.
- * Called inside crawl() so tests can control env before invoking.
- * @returns {{ concurrency: number, requestTimeoutMs: number, userAgent: string, respectCrawlDelay: boolean }}
- */
-function loadConfig() {
-  return {
-    concurrency: parseInt(process.env.CONCURRENCY || '5', 10),
-    requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 10),
-    userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (compatible; SEO-Audit-Bot/1.0)',
-    respectCrawlDelay: process.env.RESPECT_CRAWL_DELAY !== 'false',
-  };
-}
+const { loadConfig } = require('./config');
 
 /**
  * Returns a baseline page data object for pages that can't be parsed as HTML.
@@ -45,6 +32,7 @@ function emptyPage(overrides = {}) {
     external_link_count: 0,
     image_count: 0,
     images_missing_alt: 0,
+    images_empty_alt: 0,
     has_schema: 0,
     response_time_ms: null,
     page_size_bytes: null,
@@ -122,17 +110,18 @@ async function fetchPage(url, config) {
  * @param {Db} db
  * @param {string} siteUrl
  * @param {string|null} label
+ * @param {Object} config
  * @returns {Promise<{ sessionId: number, robotsData: Object, seen: Set, queue: Array }>}
  */
-async function initSession(db, siteUrl, label) {
+async function initSession(db, siteUrl, label, config) {
   const sessionId = db.createSession(siteUrl, label || null);
   console.log(`Starting session ${sessionId} for ${new URL(siteUrl).hostname}...`);
 
   console.log('Fetching robots.txt...');
-  const robotsData = await robots.fetch(siteUrl);
+  const robotsData = await robots.fetchRobots(siteUrl, config);
 
   console.log('Fetching sitemap...');
-  const sitemapUrls = await sitemap.getUrls(siteUrl, robotsData.getSitemapUrls());
+  const sitemapUrls = await sitemap.getUrls(siteUrl, robotsData.getSitemapUrls(), config);
   console.log(`Found ${sitemapUrls.length} URL(s) in sitemap`);
 
   const seen = new Set();
@@ -162,9 +151,10 @@ async function initSession(db, siteUrl, label) {
  * Resumes an interrupted session: reloads pending URLs into the queue and
  * seeds `seen` from all page URLs and link targets discovered before interruption.
  * @param {Db} db
+ * @param {Object} config
  * @returns {Promise<{ sessionId: number, robotsData: Object, seen: Set, queue: Array }>}
  */
-async function resumeSession(db) {
+async function resumeSession(db, config) {
   const interrupted = db.getLatestInterruptedSession();
   if (!interrupted) throw new Error('No interrupted session found');
 
@@ -172,7 +162,7 @@ async function resumeSession(db) {
   console.log(`Resuming session ${sessionId} (${label || 'unlabeled'})...`);
 
   console.log('Fetching robots.txt...');
-  const robotsData = await robots.fetch(siteUrl);
+  const robotsData = await robots.fetchRobots(siteUrl, config);
 
   // Seed seen from all known page URLs and all link targets discovered before
   // interruption, so we don't re-queue URLs that were already found.
@@ -247,17 +237,14 @@ async function processUrl(url, depth, ctx) {
 
   const { links, images, ...seoFields } = analyze(data, headers, url);
 
-  db.markPageCrawled(sessionId, url, emptyPage({
+  db.persistPageResult(sessionId, url, emptyPage({
     status_code: status,
     redirect_url: null,
     content_type: contentType,
     response_time_ms: responseTimeMs,
     page_size_bytes: pageSizeBytes,
     ...seoFields,
-  }));
-
-  if (links.length > 0) db.insertLinks(sessionId, links);
-  if (images.length > 0) db.insertImages(sessionId, images);
+  }), links, images);
 
   console.log(`  ${status}  ${url} — "${seoFields.title || '(no title)'}"`);
 
@@ -346,9 +333,9 @@ async function crawl(opts = {}) {
   let sessionId, robotsData, seen, queue;
   try {
     if (args.resume) {
-      ({ sessionId, robotsData, seen, queue } = await resumeSession(db));
+      ({ sessionId, robotsData, seen, queue } = await resumeSession(db, config));
     } else {
-      ({ sessionId, robotsData, seen, queue } = await initSession(db, siteUrl, args.label));
+      ({ sessionId, robotsData, seen, queue } = await initSession(db, siteUrl, args.label, config));
     }
   } catch (err) {
     db.close();

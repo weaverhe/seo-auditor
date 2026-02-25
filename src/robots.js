@@ -3,22 +3,27 @@
 const axios = require('axios');
 const robotsParser = require('robots-parser');
 
-const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (compatible; SEO-Audit-Bot/1.0)';
-const REQUEST_TIMEOUT_MS = parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 10);
+const DEFAULTS = {
+  userAgent: 'Mozilla/5.0 (compatible; SEO-Audit-Bot/1.0)',
+  requestTimeoutMs: 15000,
+};
 
 /**
  * Fetches and parses robots.txt for a given site.
  * On any fetch failure, returns a permissive object (no restrictions).
  * @param {string} siteUrl - Root URL, e.g. 'https://example.com'
+ * @param {{ userAgent?: string, requestTimeoutMs?: number }} [config]
  * @returns {Promise<{ isAllowed: (url: string) => boolean, getCrawlDelay: () => number|null, getSitemapUrls: () => string[] }>}
  */
-async function fetch(siteUrl) {
+async function fetchRobots(siteUrl, config = {}) {
+  const userAgent = config.userAgent || DEFAULTS.userAgent;
+  const timeout = config.requestTimeoutMs || DEFAULTS.requestTimeoutMs;
   const robotsUrl = new URL('/robots.txt', siteUrl).href;
 
   try {
     const response = await axios.get(robotsUrl, {
-      timeout: REQUEST_TIMEOUT_MS,
-      headers: { 'User-Agent': USER_AGENT },
+      timeout,
+      headers: { 'User-Agent': userAgent },
       validateStatus: null,
     });
 
@@ -28,10 +33,11 @@ async function fetch(siteUrl) {
 
     return {
       isAllowed(url) {
-        return robots.isAllowed(url, USER_AGENT) !== false;
+        // robots-parser returns undefined for paths not covered by any rule; treat as allowed
+        return robots.isAllowed(url, userAgent) !== false;
       },
       getCrawlDelay() {
-        return robots.getCrawlDelay(USER_AGENT) ?? null;
+        return robots.getCrawlDelay(userAgent) ?? null;
       },
       getSitemapUrls() {
         return robots.getSitemaps() ?? [];
@@ -46,4 +52,4 @@ async function fetch(siteUrl) {
   }
 }
 
-module.exports = { fetch };
+module.exports = { fetchRobots };

@@ -168,13 +168,14 @@ test('strips hash fragment from link URLs', () => {
   assert.equal(result.links[0].target_url, 'https://example.com/page');
 });
 
-test('skips mailto, tel, javascript, and bare hash links', () => {
+test('skips mailto, tel, javascript, bare hash, and fragment links', () => {
   const result = analyze(
     make(
       '<a href="mailto:a@b.com">Mail</a>' +
         '<a href="tel:555">Call</a>' +
         '<a href="javascript:void(0)">JS</a>' +
-        '<a href="#">Hash</a>'
+        '<a href="#">Hash</a>' +
+        '<a href="#section-id">Fragment</a>'
     ),
     {},
     BASE_URL
@@ -189,14 +190,15 @@ test('captures anchor text', () => {
 
 // --- Images ---
 
-test('counts images and flags missing alt', () => {
+test('counts images and distinguishes absent vs empty alt', () => {
   const result = analyze(
     make('<img src="/a.jpg" alt=""><img src="/b.jpg" alt="Logo"><img src="/c.jpg">'),
     {},
     BASE_URL
   );
   assert.equal(result.image_count, 3);
-  assert.equal(result.images_missing_alt, 2); // empty alt + absent alt
+  assert.equal(result.images_missing_alt, 1); // /c.jpg — alt attribute absent
+  assert.equal(result.images_empty_alt, 1);   // /a.jpg — alt="" (decorative)
 });
 
 test('resolves relative image src to absolute', () => {
@@ -238,6 +240,7 @@ test('plan verification fixture passes all assertions', () => {
   assert.equal(result.h1_count, 1);
   assert.equal(result.h2_count, 1);
   assert.equal(result.has_schema, 1);
-  assert.equal(result.images_missing_alt, 1);
+  assert.equal(result.images_missing_alt, 0); // img.jpg has alt="" — absent, not missing
+  assert.equal(result.images_empty_alt, 1);   // img.jpg has alt="" — explicitly empty
   assert.equal(result.canonical_url, 'https://example.com/test');
 });
