@@ -182,6 +182,49 @@ test('insertLinks bulk inserts within a transaction', () => {
   assert.equal(links[1].is_external, 1);
 });
 
+test('getSession returns the session by ID', () => {
+  const sid = db.createSession(SITE_URL, 'get-session-test');
+  const session = db.getSession(sid);
+  assert.equal(session.id, sid);
+  assert.equal(session.label, 'get-session-test');
+});
+
+test('getSession returns undefined for unknown ID', () => {
+  const session = db.getSession(99999);
+  assert.equal(session, undefined);
+});
+
+test('getPages returns all pages for a session ordered by url', () => {
+  const sid = db.createSession(SITE_URL, 'get-pages-test');
+  db.upsertPage(sid, { url: `${SITE_URL}/z`, depth: 1 });
+  db.upsertPage(sid, { url: `${SITE_URL}/a`, depth: 1 });
+  const pages = db.getPages(sid);
+  assert.equal(pages.length, 2);
+  assert.equal(pages[0].url, `${SITE_URL}/a`);
+  assert.equal(pages[1].url, `${SITE_URL}/z`);
+});
+
+test('getImages returns all images for a session', () => {
+  const sid = db.createSession(SITE_URL, 'get-images-test');
+  db.insertImages(sid, [
+    { page_url: `${SITE_URL}/`, src: '/img/a.jpg', alt: 'A' },
+    { page_url: `${SITE_URL}/`, src: '/img/b.jpg', alt: null },
+  ]);
+  const images = db.getImages(sid);
+  assert.equal(images.length, 2);
+});
+
+test('getInternalLinks returns only internal links for a session', () => {
+  const sid = db.createSession(SITE_URL, 'get-links-test');
+  db.insertLinks(sid, [
+    { source_url: `${SITE_URL}/`, target_url: `${SITE_URL}/about`, anchor_text: 'About', is_external: false },
+    { source_url: `${SITE_URL}/`, target_url: 'https://external.com', anchor_text: 'Ext', is_external: true },
+  ]);
+  const links = db.getInternalLinks(sid);
+  assert.equal(links.length, 1);
+  assert.equal(links[0].target_url, `${SITE_URL}/about`);
+});
+
 test('insertImages bulk inserts within a transaction', () => {
   const sid = db.createSession(SITE_URL, 'images-test');
   db.insertImages(sid, [

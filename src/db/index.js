@@ -99,6 +99,46 @@ class Db {
   }
 
   /**
+   * Returns a single session by ID, or undefined if not found.
+   * @param {number} sessionId
+   * @returns {{ id: number, site_url: string, label: string, status: string, started_at: string, completed_at: string, total_pages: number } | undefined}
+   */
+  getSession(sessionId) {
+    return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  }
+
+  /**
+   * Returns all pages for a session ordered by URL.
+   * @param {number} sessionId
+   * @returns {Object[]}
+   */
+  getPages(sessionId) {
+    return this.db
+      .prepare('SELECT * FROM pages WHERE session_id = ? ORDER BY url')
+      .all(sessionId);
+  }
+
+  /**
+   * Returns all images discovered during a session.
+   * @param {number} sessionId
+   * @returns {Object[]}
+   */
+  getImages(sessionId) {
+    return this.db.prepare('SELECT * FROM images WHERE session_id = ?').all(sessionId);
+  }
+
+  /**
+   * Returns all internal links discovered during a session.
+   * @param {number} sessionId
+   * @returns {Object[]}
+   */
+  getInternalLinks(sessionId) {
+    return this.db
+      .prepare('SELECT * FROM links WHERE session_id = ? AND is_external = 0')
+      .all(sessionId);
+  }
+
+  /**
    * Returns all page URLs for a session (any status).
    * Used to seed the `seen` set on resume.
    * @param {number} sessionId

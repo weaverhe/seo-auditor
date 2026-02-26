@@ -366,7 +366,7 @@ async function crawl(opts = {}) {
 
   if (!state.shuttingDown) {
     db.updateSessionStatus(sessionId, 'complete');
-    const session = db.listSessions().find((s) => s.id === sessionId);
+    const session = db.getSession(sessionId);
     console.log(`\nDone — session ${sessionId} | ${session?.total_pages ?? 0} pages crawled`);
   }
 
