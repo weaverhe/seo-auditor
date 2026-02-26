@@ -6,7 +6,7 @@ const { analyze } = require('../src/analyze');
 
 const BASE_URL = 'https://example.com/page';
 
-function make(bodyHtml, headHtml = '', headers = {}) {
+function make(bodyHtml, headHtml = '') {
   return `<html><head>${headHtml}</head><body>${bodyHtml}</body></html>`;
 }
 

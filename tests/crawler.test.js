@@ -215,7 +215,7 @@ function crawlHostname(label) { return `_test.pool.${label}.local`; }
 function crawlSiteUrl(label) { return `https://${crawlHostname(label)}`; }
 function openResultDb(label) { return new Db(crawlHostname(label)); }
 function cleanupCrawlDb(label) {
-  try { fs.rmSync(path.join('audits', crawlHostname(label)), { recursive: true }); } catch {}
+  try { fs.rmSync(path.join('audits', crawlHostname(label)), { recursive: true }); } catch { /* ignore if already removed */ }
 }
 
 function mockDeps(pages = {}) {

@@ -353,7 +353,7 @@ async function crawl(opts = {}) {
     try {
       db.updateSessionStatus(sessionId, 'interrupted');
       db.close();
-    } catch {}
+    } catch { /* best-effort shutdown */ }
     process.exit(130); // 128 + SIGINT(2) — conventional exit code for interrupted processes
   };
   process.on('SIGINT', sigintHandler);
