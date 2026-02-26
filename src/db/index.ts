@@ -1,8 +1,7 @@
-'use strict';
-
-const Database = require('better-sqlite3');
-const fs = require('fs');
-const path = require('path');
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+import type { PageData, LinkData, ImageData, Session, Page, DbImage, DbLink } from '../types';
 
 const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
 
@@ -11,12 +10,15 @@ const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
  * One instance per site — open once, reuse across the crawl.
  */
 class Db {
+  db: Database.Database;
+  closed: boolean;
+
   /**
    * Opens (or creates) the crawl database for a given hostname.
    * Creates the audits/{hostname}/ directory if it doesn't exist.
-   * @param {string} hostname - e.g. 'example.com'
+   * @param hostname - e.g. 'example.com'
    */
-  constructor(hostname) {
+  constructor(hostname: string) {
     const dir = path.join('audits', hostname);
     fs.mkdirSync(dir, { recursive: true });
     this.db = new Database(path.join(dir, 'crawl.db'));
@@ -29,7 +31,7 @@ class Db {
   /**
    * Closes the database connection. Call this when the crawl is complete.
    */
-  close() {
+  close(): void {
     if (this.closed) return;
     this.closed = true;
     this.db.close();
@@ -37,28 +39,28 @@ class Db {
 
   /**
    * Creates a new crawl session for a given site.
-   * @param {string} siteUrl - The root URL being crawled, e.g. 'https://example.com'.
-   * @param {string} [label] - Optional human-readable label, e.g. 'baseline'.
-   * @returns {number} The ID of the newly created session.
+   * @param siteUrl - The root URL being crawled, e.g. 'https://example.com'.
+   * @param label - Optional human-readable label, e.g. 'baseline'.
+   * @returns The ID of the newly created session.
    */
-  createSession(siteUrl, label) {
+  createSession(siteUrl: string, label?: string | null): number {
     const result = this.db
       .prepare('INSERT INTO sessions (site_url, label) VALUES (?, ?)')
       .run(siteUrl, label || null);
-    return result.lastInsertRowid;
+    return result.lastInsertRowid as number;
   }
 
   /**
    * Updates the status of a crawl session.
    * When status is 'complete' or 'interrupted', also sets completed_at and total_pages.
-   * @param {number} sessionId
-   * @param {'running'|'complete'|'interrupted'} status
+   * @param sessionId - The session to update.
+   * @param status - New status value.
    */
-  updateSessionStatus(sessionId, status) {
+  updateSessionStatus(sessionId: number, status: 'running' | 'complete' | 'interrupted'): void {
     if (status === 'complete' || status === 'interrupted') {
-      const { count } = this.db
+      const row = this.db
         .prepare(`SELECT COUNT(*) AS count FROM pages WHERE session_id = ? AND status = 'crawled'`)
-        .get(sessionId);
+        .get(sessionId) as { count: number };
       this.db
         .prepare(
           `
@@ -67,7 +69,7 @@ class Db {
         WHERE id = ?
       `
         )
-        .run(status, count, sessionId);
+        .run(status, row.count, sessionId);
     } else {
       this.db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run(status, sessionId);
     }
@@ -75,9 +77,9 @@ class Db {
 
   /**
    * Returns the most recent session with status 'interrupted', or undefined if none exists.
-   * @returns {{ id: number, site_url: string, label: string, status: string } | undefined}
+   * @returns The interrupted session row, or undefined.
    */
-  getLatestInterruptedSession() {
+  getLatestInterruptedSession(): Session | undefined {
     return this.db
       .prepare(
         `
@@ -87,81 +89,87 @@ class Db {
       LIMIT 1
     `
       )
-      .get();
+      .get() as Session | undefined;
   }
 
   /**
    * Returns all sessions for this site in ascending order.
-   * @returns {Array<{ id: number, site_url: string, label: string, status: string, started_at: string, completed_at: string, total_pages: number }>}
+   * @returns All session rows.
    */
-  listSessions() {
-    return this.db.prepare('SELECT * FROM sessions ORDER BY id').all();
+  listSessions(): Session[] {
+    return this.db.prepare('SELECT * FROM sessions ORDER BY id').all() as Session[];
   }
 
   /**
    * Returns a single session by ID, or undefined if not found.
-   * @param {number} sessionId
-   * @returns {{ id: number, site_url: string, label: string, status: string, started_at: string, completed_at: string, total_pages: number } | undefined}
+   * @param sessionId - The session ID to look up.
+   * @returns The session row, or undefined.
    */
-  getSession(sessionId) {
-    return this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sessionId);
+  getSession(sessionId: number): Session | undefined {
+    return this.db
+      .prepare('SELECT * FROM sessions WHERE id = ?')
+      .get(sessionId) as Session | undefined;
   }
 
   /**
    * Returns all pages for a session ordered by URL.
-   * @param {number} sessionId
-   * @returns {Object[]}
+   * @param sessionId - The session to query.
+   * @returns All page rows for the session.
    */
-  getPages(sessionId) {
+  getPages(sessionId: number): Page[] {
     return this.db
       .prepare('SELECT * FROM pages WHERE session_id = ? ORDER BY url')
-      .all(sessionId);
+      .all(sessionId) as Page[];
   }
 
   /**
    * Returns all images discovered during a session.
-   * @param {number} sessionId
-   * @returns {Object[]}
+   * @param sessionId - The session to query.
+   * @returns All image rows for the session.
    */
-  getImages(sessionId) {
-    return this.db.prepare('SELECT * FROM images WHERE session_id = ?').all(sessionId);
+  getImages(sessionId: number): DbImage[] {
+    return this.db
+      .prepare('SELECT * FROM images WHERE session_id = ?')
+      .all(sessionId) as DbImage[];
   }
 
   /**
    * Returns all internal links discovered during a session.
-   * @param {number} sessionId
-   * @returns {Object[]}
+   * @param sessionId - The session to query.
+   * @returns Internal link rows (is_external = 0) for the session.
    */
-  getInternalLinks(sessionId) {
+  getInternalLinks(sessionId: number): DbLink[] {
     return this.db
       .prepare('SELECT * FROM links WHERE session_id = ? AND is_external = 0')
-      .all(sessionId);
+      .all(sessionId) as DbLink[];
   }
 
   /**
    * Returns all page URLs for a session (any status).
    * Used to seed the `seen` set on resume.
-   * @param {number} sessionId
-   * @returns {string[]}
+   * @param sessionId - The session to query.
+   * @returns Array of URL strings.
    */
-  getAllPageUrls(sessionId) {
-    return this.db
-      .prepare('SELECT url FROM pages WHERE session_id = ?')
-      .all(sessionId)
-      .map((r) => r.url);
+  getAllPageUrls(sessionId: number): string[] {
+    return (
+      this.db
+        .prepare('SELECT url FROM pages WHERE session_id = ?')
+        .all(sessionId) as { url: string }[]
+    ).map((r) => r.url);
   }
 
   /**
    * Returns all distinct link target URLs discovered during a session.
    * Used alongside getAllPageUrls to fully seed `seen` on resume.
-   * @param {number} sessionId
-   * @returns {string[]}
+   * @param sessionId - The session to query.
+   * @returns Array of target URL strings.
    */
-  getLinkTargetUrls(sessionId) {
-    return this.db
-      .prepare('SELECT DISTINCT target_url FROM links WHERE session_id = ?')
-      .all(sessionId)
-      .map((r) => r.target_url);
+  getLinkTargetUrls(sessionId: number): string[] {
+    return (
+      this.db
+        .prepare('SELECT DISTINCT target_url FROM links WHERE session_id = ?')
+        .all(sessionId) as { target_url: string }[]
+    ).map((r) => r.target_url);
   }
 
   /**
@@ -170,10 +178,22 @@ class Db {
    * updated on duplicates. In practice, sitemap URLs are seeded before crawling begins so
    * they get in_sitemap=1 and depth=0. Link-discovered URLs inserted later are silently
    * ignored if already present.
-   * @param {number} sessionId
-   * @param {{ url: string, status?: string, depth?: number, in_sitemap?: number }} page
+   * @param sessionId - The session this page belongs to.
+   * @param page - The page fields to insert.
+   * @param page.url - The page URL.
+   * @param [page.status] - Initial status; defaults to 'pending'.
+   * @param [page.depth] - Crawl depth; defaults to 0.
+   * @param [page.in_sitemap] - Whether the URL was found in the sitemap; defaults to 0.
    */
-  upsertPage(sessionId, { url, status = 'pending', depth = 0, in_sitemap = 0 }) {
+  upsertPage(
+    sessionId: number,
+    { url, status = 'pending', depth = 0, in_sitemap = 0 }: {
+      url: string;
+      status?: string;
+      depth?: number;
+      in_sitemap?: number;
+    }
+  ): void {
     this.db
       .prepare(
         `
@@ -187,10 +207,10 @@ class Db {
 
   /**
    * Returns all pending URLs for a session, ordered shallowest-first.
-   * @param {number} sessionId
-   * @returns {Array<{ url: string, depth: number }>}
+   * @param sessionId - The session to query.
+   * @returns Array of pending URL + depth pairs.
    */
-  getPendingUrls(sessionId) {
+  getPendingUrls(sessionId: number): { url: string; depth: number }[] {
     return this.db
       .prepare(
         `
@@ -199,18 +219,18 @@ class Db {
       ORDER BY depth ASC
     `
       )
-      .all(sessionId);
+      .all(sessionId) as { url: string; depth: number }[];
   }
 
   /**
    * Marks a page as crawled and writes all extracted SEO data.
    * The SET clause is built dynamically from the keys of `data`, so whatever fields
-   * emptyPage() (in crawler.js) defines are automatically written — no manual sync needed.
-   * @param {number} sessionId
-   * @param {string} url
-   * @param {Object} data - Fields matching the pages table columns (see schema.sql).
+   * emptyPage() (in crawler.ts) defines are automatically written — no manual sync needed.
+   * @param sessionId - The session this page belongs to.
+   * @param url - The URL that was crawled.
+   * @param data - Fields matching the pages table columns (see schema.sql).
    */
-  markPageCrawled(sessionId, url, data) {
+  markPageCrawled(sessionId: number, url: string, data: PageData): void {
     const setClause = Object.keys(data)
       .map((col) => `${col} = @${col}`)
       .join(',\n        ');
@@ -222,33 +242,43 @@ class Db {
         ${setClause}
       WHERE session_id = @session_id AND url = @url`
       )
-      .run({ ...data, session_id: sessionId, url });
+      .run({ ...(data as unknown as Record<string, unknown>), session_id: sessionId, url });
   }
 
   /**
    * Marks a page as errored with an optional status code and message.
-   * @param {number} sessionId
-   * @param {string} url
-   * @param {number|null} statusCode
-   * @param {string|null} errorMessage
+   * @param sessionId - The session this page belongs to.
+   * @param url - The URL that errored.
+   * @param statusCode - HTTP status code, or null for network errors.
+   * @param errorMessage - Human-readable error description.
    */
-  markPageError(sessionId, url, statusCode, errorMessage) {
+  markPageError(
+    sessionId: number,
+    url: string,
+    statusCode: number | null,
+    errorMessage: string | null
+  ): void {
     this.db
       .prepare(
         `UPDATE pages
       SET status = 'error', status_code = @status_code, error_message = @error_message, crawled_at = datetime('now')
       WHERE session_id = @session_id AND url = @url`
       )
-      .run({ session_id: sessionId, url, status_code: statusCode || null, error_message: errorMessage || null });
+      .run({
+        session_id: sessionId,
+        url,
+        status_code: statusCode || null,
+        error_message: errorMessage || null,
+      });
   }
 
   /**
    * Marks a page as skipped (e.g. disallowed by robots.txt).
-   * @param {number} sessionId
-   * @param {string} url
-   * @param {string} [reason] - Human-readable explanation.
+   * @param sessionId - The session this page belongs to.
+   * @param url - The URL that was skipped.
+   * @param reason - Human-readable explanation.
    */
-  markPageSkipped(sessionId, url, reason) {
+  markPageSkipped(sessionId: number, url: string, reason?: string): void {
     this.db
       .prepare(
         `UPDATE pages
@@ -262,13 +292,19 @@ class Db {
    * Atomically persists a crawled page's SEO data alongside its links and images.
    * Wraps markPageCrawled + insertLinks + insertImages in a single transaction so a
    * crash between them can't leave a page marked crawled with no links/images recorded.
-   * @param {number} sessionId
-   * @param {string} url
-   * @param {Object} pageData - Passed directly to markPageCrawled.
-   * @param {Array} [links]
-   * @param {Array} [images]
+   * @param sessionId - The session this page belongs to.
+   * @param url - The URL that was crawled.
+   * @param pageData - Passed directly to markPageCrawled.
+   * @param links - Links discovered on the page.
+   * @param images - Images discovered on the page.
    */
-  persistPageResult(sessionId, url, pageData, links = [], images = []) {
+  persistPageResult(
+    sessionId: number,
+    url: string,
+    pageData: PageData,
+    links: LinkData[] = [],
+    images: ImageData[] = []
+  ): void {
     this.db.transaction(() => {
       this.markPageCrawled(sessionId, url, pageData);
       if (links.length > 0) this.insertLinks(sessionId, links);
@@ -278,14 +314,14 @@ class Db {
 
   /**
    * Bulk-inserts links found on a page within a single transaction.
-   * @param {number} sessionId
-   * @param {Array<{ source_url: string, target_url: string, anchor_text?: string, is_external: boolean }>} links
+   * @param sessionId - The session these links belong to.
+   * @param links - The link records to insert.
    */
-  insertLinks(sessionId, links) {
+  insertLinks(sessionId: number, links: LinkData[]): void {
     const stmt = this.db.prepare(
       'INSERT INTO links (session_id, source_url, target_url, anchor_text, is_external) VALUES (?, ?, ?, ?, ?)'
     );
-    this.db.transaction((rows) => {
+    this.db.transaction((rows: LinkData[]) => {
       for (const link of rows) {
         stmt.run(
           sessionId,
@@ -300,14 +336,14 @@ class Db {
 
   /**
    * Bulk-inserts images found on a page within a single transaction.
-   * @param {number} sessionId
-   * @param {Array<{ page_url: string, src: string, alt?: string }>} images
+   * @param sessionId - The session these images belong to.
+   * @param images - The image records to insert.
    */
-  insertImages(sessionId, images) {
+  insertImages(sessionId: number, images: ImageData[]): void {
     const stmt = this.db.prepare(
       'INSERT INTO images (session_id, page_url, src, alt) VALUES (?, ?, ?, ?)'
     );
-    this.db.transaction((rows) => {
+    this.db.transaction((rows: ImageData[]) => {
       for (const img of rows) {
         stmt.run(sessionId, img.page_url, img.src, img.alt ?? null);
       }
@@ -315,4 +351,4 @@ class Db {
   }
 }
 
-module.exports = Db;
+export default Db;

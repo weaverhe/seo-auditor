@@ -1,16 +1,21 @@
-'use strict';
+import { test, mock, before, after, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import axios from 'axios';
+import Db from '../src/db';
+import { parseArgs, loadConfig, fetchPage, processUrl, crawl } from '../src/crawler';
+import type { Config, RobotsData } from '../src/types';
+// require().default matches how crawler.ts imports these modules — ensures mock.method
+// patches the same plain-object default export that crawler.ts holds. Named exports from
+// esbuild are non-configurable getters; properties on a plain default-exported object are
+// ordinary value properties (configurable: true) that mock.method can replace.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const robots = require('../src/robots').default as typeof import('../src/robots').default;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sitemap = require('../src/sitemap').default as typeof import('../src/sitemap').default;
 
-const { test, mock, before, after, afterEach } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const axios = require('axios');
-const Db = require('../src/db');
-const { parseArgs, loadConfig, fetchPage, processUrl, crawl } = require('../src/crawler');
-const robots = require('../src/robots');
-const sitemap = require('../src/sitemap');
-
-const TEST_CONFIG = {
+const TEST_CONFIG: Config = {
   concurrency: 2,
   requestTimeoutMs: 5000,
   userAgent: 'test-bot',
@@ -71,7 +76,7 @@ test('fetchPage: returns status and data on 200', async () => {
 
 test('fetchPage: returns redirect url on 301', async () => {
   mock.method(axios, 'get', async () => {
-    const err = new Error('redirect');
+    const err = new Error('redirect') as Error & { response: unknown };
     err.response = { status: 301, headers: { location: 'https://example.com/new' } };
     throw err;
   });
@@ -92,10 +97,10 @@ test('fetchPage: returns error message on network failure', async () => {
 
 const HOSTNAME = '_test.crawler.local';
 const SITE_URL = 'https://_test.crawler.local';
-let db;
-let sessionId;
+let db: Db;
+let sessionId: number;
 
-const permissiveRobots = {
+const permissiveRobots: RobotsData = {
   isAllowed: () => true,
   getCrawlDelay: () => null,
   getSitemapUrls: () => [],
@@ -116,7 +121,7 @@ after(() => {
   fs.rmSync(path.join('audits', HOSTNAME), { recursive: true });
 });
 
-function makeCtx(overrides = {}) {
+function makeCtx(overrides: Partial<{ db: Db; sessionId: number; robotsData: RobotsData; crawlDelay: number | null; config: Config }> = {}) {
   return { db, sessionId, robotsData: permissiveRobots, crawlDelay: null, config: TEST_CONFIG, ...overrides };
 }
 
@@ -133,7 +138,7 @@ test('processUrl: crawls HTML page and discovers internal links', async () => {
   const newUrls = await processUrl(`${SITE_URL}/`, 0, makeCtx());
   const row = db.db
     .prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?')
-    .get(sessionId, `${SITE_URL}/`);
+    .get(sessionId, `${SITE_URL}/`) as { status: string; title: string; status_code: number; internal_link_count: number; external_link_count: number };
 
   assert.equal(row.status, 'crawled');
   assert.equal(row.title, 'Home');
@@ -141,14 +146,14 @@ test('processUrl: crawls HTML page and discovers internal links', async () => {
   assert.equal(row.internal_link_count, 1);
   assert.equal(row.external_link_count, 1);
   assert.ok(Array.isArray(newUrls));
-  assert.equal(newUrls.length, 1);
-  assert.equal(newUrls[0].url, `${SITE_URL}/about`);
-  assert.equal(newUrls[0].depth, 1);
+  assert.equal(newUrls!.length, 1);
+  assert.equal(newUrls![0].url, `${SITE_URL}/about`);
+  assert.equal(newUrls![0].depth, 1);
 });
 
 test('processUrl: records redirect and returns destination url', async () => {
   mock.method(axios, 'get', async () => {
-    const err = new Error('redirect');
+    const err = new Error('redirect') as Error & { response: unknown };
     err.response = { status: 301, headers: { location: `${SITE_URL}/new` } };
     throw err;
   });
@@ -156,13 +161,13 @@ test('processUrl: records redirect and returns destination url', async () => {
   const newUrls = await processUrl(`${SITE_URL}/old`, 1, makeCtx());
   const row = db.db
     .prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?')
-    .get(sessionId, `${SITE_URL}/old`);
+    .get(sessionId, `${SITE_URL}/old`) as { status: string; status_code: number; redirect_url: string };
 
   assert.equal(row.status, 'crawled');
   assert.equal(row.status_code, 301);
   assert.equal(row.redirect_url, `${SITE_URL}/new`);
   assert.ok(Array.isArray(newUrls));
-  assert.equal(newUrls[0].url, `${SITE_URL}/new`);
+  assert.equal(newUrls![0].url, `${SITE_URL}/new`);
 });
 
 test('processUrl: records error on 404', async () => {
@@ -175,7 +180,7 @@ test('processUrl: records error on 404', async () => {
   const newUrls = await processUrl(`${SITE_URL}/broken`, 1, makeCtx());
   const row = db.db
     .prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?')
-    .get(sessionId, `${SITE_URL}/broken`);
+    .get(sessionId, `${SITE_URL}/broken`) as { status: string; status_code: number };
 
   assert.equal(row.status, 'error');
   assert.equal(row.status_code, 404);
@@ -183,11 +188,11 @@ test('processUrl: records error on 404', async () => {
 });
 
 test('processUrl: skips url disallowed by robots.txt', async () => {
-  const blockingRobots = { ...permissiveRobots, isAllowed: () => false };
+  const blockingRobots: RobotsData = { ...permissiveRobots, isAllowed: () => false };
   const newUrls = await processUrl(`${SITE_URL}/disallowed`, 1, makeCtx({ robotsData: blockingRobots }));
   const row = db.db
     .prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?')
-    .get(sessionId, `${SITE_URL}/disallowed`);
+    .get(sessionId, `${SITE_URL}/disallowed`) as { status: string };
 
   assert.equal(row.status, 'skipped');
   assert.equal(newUrls, null);
@@ -204,28 +209,28 @@ test('processUrl: sets is_indexable to null for non-HTML responses', async () =>
   await processUrl(`${SITE_URL}/file.pdf`, 1, makeCtx());
   const row = db.db
     .prepare('SELECT is_indexable FROM pages WHERE session_id = ? AND url = ?')
-    .get(sessionId, `${SITE_URL}/file.pdf`);
+    .get(sessionId, `${SITE_URL}/file.pdf`) as { is_indexable: number | null };
 
   assert.equal(row.is_indexable, null);
 });
 
 // --- crawl() pool integration ---
 
-function crawlHostname(label) { return `_test.pool.${label}.local`; }
-function crawlSiteUrl(label) { return `https://${crawlHostname(label)}`; }
-function openResultDb(label) { return new Db(crawlHostname(label)); }
-function cleanupCrawlDb(label) {
+function crawlHostname(label: string) { return `_test.pool.${label}.local`; }
+function crawlSiteUrl(label: string) { return `https://${crawlHostname(label)}`; }
+function openResultDb(label: string) { return new Db(crawlHostname(label)); }
+function cleanupCrawlDb(label: string) {
   try { fs.rmSync(path.join('audits', crawlHostname(label)), { recursive: true }); } catch { /* ignore if already removed */ }
 }
 
-function mockDeps(pages = {}) {
-  mock.method(robots, 'fetchRobots', async () => ({
+function mockDeps(pages: Record<string, string> = {}) {
+  mock.method(robots, 'fetchRobots', async (): Promise<RobotsData> => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],
   }));
   mock.method(sitemap, 'getUrls', async () => []);
-  mock.method(axios, 'get', async (url) => {
+  mock.method(axios, 'get', async (url: string) => {
     const page = pages[url];
     if (!page) return { status: 404, headers: {}, data: 'Not found' };
     return { status: 200, headers: { 'content-type': 'text/html' }, data: page };
@@ -234,7 +239,7 @@ function mockDeps(pages = {}) {
 
 test('crawl(): crawls all sitemap URLs and homepage', async () => {
   const site = crawlSiteUrl('sitemap');
-  mock.method(robots, 'fetchRobots', async () => ({
+  mock.method(robots, 'fetchRobots', async (): Promise<RobotsData> => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],
@@ -249,9 +254,9 @@ test('crawl(): crawls all sitemap URLs and homepage', async () => {
   await crawl({ args: { site, label: 'test', resume: false }, config: TEST_CONFIG });
 
   const resultDb = openResultDb('sitemap');
-  const crawled = resultDb.db
+  const crawled = (resultDb.db
     .prepare("SELECT url FROM pages WHERE status = 'crawled' ORDER BY url")
-    .all().map((r) => r.url);
+    .all() as { url: string }[]).map((r) => r.url);
   resultDb.close();
   cleanupCrawlDb('sitemap');
 
@@ -272,9 +277,9 @@ test('crawl(): discovers and crawls linked pages', async () => {
   await crawl({ args: { site, label: 'test', resume: false }, config: TEST_CONFIG });
 
   const resultDb = openResultDb('links');
-  const crawled = resultDb.db
+  const crawled = (resultDb.db
     .prepare("SELECT url FROM pages WHERE status = 'crawled' ORDER BY url")
-    .all().map((r) => r.url);
+    .all() as { url: string }[]).map((r) => r.url);
   resultDb.close();
   cleanupCrawlDb('links');
 
@@ -323,7 +328,7 @@ test('crawl(): resumes interrupted session and crawls remaining pending pages', 
   setupDb.updateSessionStatus(sid, 'interrupted');
   setupDb.close();
 
-  mock.method(robots, 'fetchRobots', async () => ({
+  mock.method(robots, 'fetchRobots', async (): Promise<RobotsData> => ({
     isAllowed: () => true,
     getCrawlDelay: () => null,
     getSitemapUrls: () => [],
@@ -338,12 +343,12 @@ test('crawl(): resumes interrupted session and crawls remaining pending pages', 
 
   const resultDb = openResultDb('resume');
   const pages = resultDb.db
-    .prepare('SELECT url, status FROM pages WHERE session_id = ?').all(sid);
+    .prepare('SELECT url, status FROM pages WHERE session_id = ?').all(sid) as { url: string; status: string }[];
   resultDb.close();
   cleanupCrawlDb('resume');
 
-  assert.equal(pages.find((p) => p.url === `${site}/done`).status, 'crawled');
-  assert.equal(pages.find((p) => p.url === `${site}/pending`).status, 'crawled');
+  assert.equal(pages.find((p) => p.url === `${site}/done`)!.status, 'crawled');
+  assert.equal(pages.find((p) => p.url === `${site}/pending`)!.status, 'crawled');
 });
 
 test('crawl(): throws when --site is not provided', async () => {

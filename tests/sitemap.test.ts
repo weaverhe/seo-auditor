@@ -1,9 +1,7 @@
-'use strict';
-
-const { test, mock, afterEach } = require('node:test');
-const assert = require('node:assert/strict');
-const Sitemapper = require('sitemapper').default;
-const sitemap = require('../src/sitemap');
+import { test, mock, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import Sitemapper from 'sitemapper';
+import sitemap from '../src/sitemap';
 
 afterEach(() => mock.restoreAll());
 
@@ -18,8 +16,8 @@ test('getUrls returns URLs from /sitemap.xml when no robots sitemap provided', a
 });
 
 test('getUrls uses robots.txt sitemap URLs when provided', async () => {
-  let fetchedUrl;
-  mock.method(Sitemapper.prototype, 'fetch', async function (url) {
+  let fetchedUrl: string | undefined;
+  mock.method(Sitemapper.prototype, 'fetch', async function (this: unknown, url: string) {
     fetchedUrl = url;
     return { sites: ['https://example.com/page1'], errors: [] };
   });

@@ -1,17 +1,44 @@
-'use strict';
+import { load } from 'cheerio';
+import type { LinkData, ImageData } from './types';
 
-const cheerio = require('cheerio');
+/** All SEO fields extracted from a page, plus the raw links and images arrays. */
+export interface AnalyzeResult {
+  title: string | null;
+  title_length: number | null;
+  meta_description: string | null;
+  meta_desc_length: number | null;
+  robots_directive: string | null;
+  x_robots_tag: string | null;
+  is_indexable: 0 | 1;
+  canonical_url: string | null;
+  h1: string | null;
+  h1_count: number;
+  h2_count: number;
+  has_schema: 0 | 1;
+  word_count: number;
+  internal_link_count: number;
+  external_link_count: number;
+  image_count: number;
+  images_missing_alt: number;
+  images_empty_alt: number;
+  links: LinkData[];
+  images: ImageData[];
+}
 
 /**
  * Extracts SEO-relevant data from a page's HTML and response headers.
  * Pure function — no I/O.
- * @param {string} html - Raw HTML of the page
- * @param {Object} headers - Response headers (lowercase keys, e.g. from axios)
- * @param {string} url - Absolute URL of the page (used for link/image normalization)
- * @returns {Object} SEO data fields for the pages table, plus links[] and images[] arrays
+ * @param html - Raw HTML of the page.
+ * @param headers - Response headers (lowercase keys, e.g. from axios).
+ * @param url - Absolute URL of the page (used for link/image normalization).
+ * @returns SEO data fields for the pages table, plus links[] and images[] arrays.
  */
-function analyze(html, headers, url) {
-  const $ = cheerio.load(html);
+export function analyze(
+  html: string,
+  headers: Record<string, string>,
+  url: string
+): AnalyzeResult {
+  const $ = load(html);
   const pageHost = new URL(url).hostname;
 
   // Title
@@ -27,7 +54,7 @@ function analyze(html, headers, url) {
   const robotsValues = $('meta[name="robots"], meta[name="googlebot"]')
     .map((_, el) => $(el).attr('content'))
     .get()
-    .filter(Boolean);
+    .filter(Boolean) as string[];
   const robots_directive = robotsValues.length > 0 ? robotsValues.join(', ') : null;
 
   // X-Robots-Tag header (axios lowercases header names)
@@ -35,7 +62,7 @@ function analyze(html, headers, url) {
 
   // Indexability — noindex in either meta robots or X-Robots-Tag
   const noindexPattern = /noindex/i;
-  const is_indexable =
+  const is_indexable: 0 | 1 =
     noindexPattern.test(robots_directive || '') || noindexPattern.test(x_robots_tag || '')
       ? 0
       : 1;
@@ -50,7 +77,7 @@ function analyze(html, headers, url) {
   const h2_count = $('h2').length;
 
   // Structured data
-  const has_schema = $('script[type="application/ld+json"]').length > 0 ? 1 : 0;
+  const has_schema: 0 | 1 = $('script[type="application/ld+json"]').length > 0 ? 1 : 0;
 
   // Word count — strip scripts/styles/noscript, then count whitespace-separated tokens
   const bodyClone = $('body').clone();
@@ -59,14 +86,14 @@ function analyze(html, headers, url) {
   const word_count = bodyText ? bodyText.split(' ').filter(Boolean).length : 0;
 
   // Links
-  const links = [];
+  const links: LinkData[] = [];
   $('a[href]').each((_, el) => {
     const raw = $(el).attr('href')?.trim();
     // Skip protocol-less links and any fragment-only href (bare # or #section-id).
     // Note: sites using <base href> will have relative URLs misresolved here — TODO if needed.
     if (!raw || /^(mailto:|tel:|javascript:|#)/.test(raw)) return;
 
-    let targetUrl;
+    let targetUrl: string;
     try {
       const parsed = new URL(raw, url);
       parsed.hash = '';
@@ -84,12 +111,12 @@ function analyze(html, headers, url) {
   const external_link_count = links.filter((l) => l.is_external).length;
 
   // Images — alt=null means attribute absent, alt='' means present but empty; both are flagged
-  const images = [];
+  const images: ImageData[] = [];
   $('img').each((_, el) => {
     const src = $(el).attr('src')?.trim();
     if (!src) return;
 
-    let absoluteSrc;
+    let absoluteSrc: string;
     try {
       absoluteSrc = new URL(src, url).href;
     } catch {
@@ -130,5 +157,3 @@ function analyze(html, headers, url) {
     images,
   };
 }
-
-module.exports = { analyze };

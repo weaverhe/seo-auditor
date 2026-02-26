@@ -1,12 +1,10 @@
-'use strict';
-
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { analyze } = require('../src/analyze');
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { analyze } from '../src/analyze';
 
 const BASE_URL = 'https://example.com/page';
 
-function make(bodyHtml, headHtml = '') {
+function make(bodyHtml: string, headHtml = ''): string {
   return `<html><head>${headHtml}</head><body>${bodyHtml}</body></html>`;
 }
 

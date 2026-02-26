@@ -2,11 +2,12 @@
   "name": "seo-auditor",
   "version": "1.0.0",
   "description": "General-purpose Node.js SEO crawler and audit tool",
-  "main": "src/crawler.js",
+  "main": "src/crawler.ts",
   "scripts": {
-    "crawl": "node src/crawler.js",
-    "report": "node src/report.js",
-    "test": "node --test tests/**/*.test.js",
+    "crawl": "tsx src/crawler.ts",
+    "report": "tsx src/report.ts",
+    "test": "node --require tsx/cjs --test tests/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write ."
   },
@@ -26,9 +27,15 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.0",
     "eslint": "^10.0.2",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-jsdoc": "^62.7.1",
     "globals": "^17.3.0",
-    "prettier": "^3.8.1"
+    "prettier": "^3.8.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.1"
   }
 }

@@ -1,12 +1,12 @@
-'use strict';
+import type { Config } from './types';
 
 /**
  * Reads crawler configuration from process.env.
  * Call this inside your entry function (not at module load time) so tests can
  * control env before invoking.
- * @returns {{ concurrency: number, requestTimeoutMs: number, userAgent: string, respectCrawlDelay: boolean }}
+ * @returns The resolved configuration object.
  */
-function loadConfig() {
+export function loadConfig(): Config {
   return {
     concurrency: parseInt(process.env.CONCURRENCY || '5', 10),
     requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 10),
@@ -14,5 +14,3 @@ function loadConfig() {
     respectCrawlDelay: process.env.RESPECT_CRAWL_DELAY !== 'false',
   };
 }
-
-module.exports = { loadConfig };

@@ -1,15 +1,14 @@
-'use strict';
-
-const fs = require('fs');
-const path = require('path');
-const { pipeline } = require('node:stream/promises');
-const { Readable } = require('node:stream');
-const { format } = require('fast-csv');
-const Db = require('./db');
+import fs from 'node:fs';
+import path from 'node:path';
+import { pipeline } from 'node:stream/promises';
+import { Readable } from 'node:stream';
+import { format } from 'fast-csv';
+import Db from './db';
+import type { Page, DbImage, DbLink } from './types';
 
 // Fields compared in diff reports. Module-level so they're easy to find and document.
 // Chosen because they're the most likely to surface SEO regressions between crawls.
-const DIFF_FIELDS = [
+const DIFF_FIELDS: (keyof Page)[] = [
   'status_code',
   'title',
   'meta_description',
@@ -19,14 +18,22 @@ const DIFF_FIELDS = [
   'robots_directive',
 ];
 
+/** Parsed report CLI arguments. */
+export interface ReportArgs {
+  site: string | null;
+  session: number | null;
+  compare: [number, number] | null;
+  listSessions: boolean;
+}
+
 /**
  * Parses report CLI flags from an args array (pass process.argv.slice(2)).
  * Throws with a descriptive message if numeric flags receive non-numeric values.
- * @param {string[]} argv
- * @returns {{ site: string|null, session: number|null, compare: [number,number]|null, listSessions: boolean }}
+ * @param argv - Raw CLI argument strings.
+ * @returns Parsed flag values.
  */
-function parseArgs(argv) {
-  const result = { site: null, session: null, compare: null, listSessions: false };
+export function parseArgs(argv: string[]): ReportArgs {
+  const result: ReportArgs = { site: null, session: null, compare: null, listSessions: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--site') {
       result.site = argv[++i] ?? null;
@@ -56,11 +63,11 @@ function parseArgs(argv) {
  * Uses the first row's keys as headers (fast-csv default with `headers: true`).
  * An empty rows array produces an empty file with no header row — consumers
  * should treat a 0-byte CSV as "no data" rather than an error.
- * @param {string} filePath - Absolute or relative path to write to.
- * @param {Object[]} rows - Array of plain objects; all objects must share the same key set.
- * @returns {Promise<void>}
+ * @param filePath - Absolute or relative path to write to.
+ * @param rows - Array of plain objects; all objects must share the same key set.
+ * @returns Resolves when the file is fully written.
  */
-async function writeCsv(filePath, rows) {
+export async function writeCsv(filePath: string, rows: Record<string, unknown>[]): Promise<void> {
   await pipeline(
     Readable.from(rows),
     format({ headers: true }),
@@ -75,12 +82,12 @@ async function writeCsv(filePath, rows) {
 /**
  * Builds a value-to-count map for detecting duplicates.
  * Keys with falsy values (null, undefined, empty string) are excluded.
- * @param {Object[]} items
- * @param {function(Object): *} keyFn - Returns the value to count per item.
- * @returns {Map}
+ * @param items - The array of objects to count over.
+ * @param keyFn - Returns the value to count per item.
+ * @returns Map from value to occurrence count.
  */
-function buildDuplicateMap(items, keyFn) {
-  const counts = new Map();
+export function buildDuplicateMap<T>(items: T[], keyFn: (item: T) => unknown): Map<unknown, number> {
+  const counts = new Map<unknown, number>();
   for (const item of items) {
     const key = keyFn(item);
     if (key) counts.set(key, (counts.get(key) || 0) + 1);
@@ -94,10 +101,10 @@ function buildDuplicateMap(items, keyFn) {
 
 /**
  * Builds rows for all-pages.csv — one row per URL regardless of status.
- * @param {Object[]} pages - All pages rows for a session.
- * @returns {Array<{ url: string, status: string, status_code: string|number, content_type: string, is_indexable: string|number, depth: string|number }>}
+ * @param pages - All pages rows for a session.
+ * @returns One row per page with url, status, status_code, content_type, is_indexable, depth.
  */
-function allPagesRows(pages) {
+export function allPagesRows(pages: Page[]): Record<string, unknown>[] {
   return pages.map((p) => ({
     url: p.url,
     status: p.status,
@@ -111,43 +118,43 @@ function allPagesRows(pages) {
 /**
  * Builds rows for page-titles.csv.
  * Computes duplicate flag in-memory — a title is duplicate if it appears on 2+ pages.
- * @param {Object[]} htmlPages - Crawled HTML pages only (pre-filtered by caller).
- * @returns {Array<{ url: string, title: string, title_length: string|number, missing: 0|1, duplicate: 0|1 }>}
+ * @param htmlPages - Crawled HTML pages only (pre-filtered by caller).
+ * @returns One row per page with url, title, title_length, missing, duplicate flags.
  */
-function pageTitlesRows(htmlPages) {
+export function pageTitlesRows(htmlPages: Page[]): Record<string, unknown>[] {
   const counts = buildDuplicateMap(htmlPages, (p) => p.title);
   return htmlPages.map((p) => ({
     url: p.url,
     title: p.title ?? '',
     title_length: p.title_length ?? '',
     missing: p.title === null ? 1 : 0,
-    duplicate: p.title && counts.get(p.title) > 1 ? 1 : 0,
+    duplicate: p.title && (counts.get(p.title) ?? 0) > 1 ? 1 : 0,
   }));
 }
 
 /**
  * Builds rows for meta-descriptions.csv.
  * Computes duplicate flag in-memory — a description is duplicate if it appears on 2+ pages.
- * @param {Object[]} htmlPages - Crawled HTML pages only (pre-filtered by caller).
- * @returns {Array<{ url: string, meta_description: string, meta_desc_length: string|number, missing: 0|1, duplicate: 0|1 }>}
+ * @param htmlPages - Crawled HTML pages only (pre-filtered by caller).
+ * @returns One row per page with url, meta_description, meta_desc_length, missing, duplicate flags.
  */
-function metaDescriptionsRows(htmlPages) {
+export function metaDescriptionsRows(htmlPages: Page[]): Record<string, unknown>[] {
   const counts = buildDuplicateMap(htmlPages, (p) => p.meta_description);
   return htmlPages.map((p) => ({
     url: p.url,
     meta_description: p.meta_description ?? '',
     meta_desc_length: p.meta_desc_length ?? '',
     missing: p.meta_description === null ? 1 : 0,
-    duplicate: p.meta_description && counts.get(p.meta_description) > 1 ? 1 : 0,
+    duplicate: p.meta_description && (counts.get(p.meta_description) ?? 0) > 1 ? 1 : 0,
   }));
 }
 
 /**
  * Builds rows for h1-tags.csv.
- * @param {Object[]} htmlPages - Crawled HTML pages only (pre-filtered by caller).
- * @returns {Array<{ url: string, h1: string, h1_count: number, issue: 'missing'|'multiple'|'ok' }>}
+ * @param htmlPages - Crawled HTML pages only (pre-filtered by caller).
+ * @returns One row per page with url, h1, h1_count, and issue classification.
  */
-function h1TagsRows(htmlPages) {
+export function h1TagsRows(htmlPages: Page[]): Record<string, unknown>[] {
   return htmlPages.map((p) => ({
     url: p.url,
     h1: p.h1 ?? '',
@@ -158,10 +165,10 @@ function h1TagsRows(htmlPages) {
 
 /**
  * Builds rows for canonicals.csv.
- * @param {Object[]} htmlPages - Crawled HTML pages only (pre-filtered by caller).
- * @returns {Array<{ url: string, canonical_url: string, type: 'self'|'points-elsewhere'|'missing' }>}
+ * @param htmlPages - Crawled HTML pages only (pre-filtered by caller).
+ * @returns One row per page with url, canonical_url, and type classification.
  */
-function canonicalsRows(htmlPages) {
+export function canonicalsRows(htmlPages: Page[]): Record<string, unknown>[] {
   return htmlPages.map((p) => ({
     url: p.url,
     canonical_url: p.canonical_url ?? '',
@@ -171,12 +178,12 @@ function canonicalsRows(htmlPages) {
 
 /**
  * Builds rows for redirects.csv — only pages with a 3xx status code.
- * @param {Object[]} pages - All pages rows for a session.
- * @returns {Array<{ source_url: string, redirect_url: string, status_code: number }>}
+ * @param pages - All pages rows for a session.
+ * @returns One row per redirect with source_url, redirect_url, status_code.
  */
-function redirectsRows(pages) {
+export function redirectsRows(pages: Page[]): Record<string, unknown>[] {
   return pages
-    .filter((p) => p.status_code >= 300 && p.status_code < 400)
+    .filter((p) => (p.status_code ?? 0) >= 300 && (p.status_code ?? 0) < 400)
     .map((p) => ({
       source_url: p.url,
       redirect_url: p.redirect_url ?? '',
@@ -186,10 +193,10 @@ function redirectsRows(pages) {
 
 /**
  * Builds rows for images.csv from the images table.
- * @param {Object[]} images - All images rows for a session.
- * @returns {Array<{ page_url: string, src: string, alt: string, missing_alt: 0|1, empty_alt: 0|1 }>}
+ * @param images - All images rows for a session.
+ * @returns One row per image with page_url, src, alt, missing_alt, empty_alt flags.
  */
-function imagesRows(images) {
+export function imagesRows(images: DbImage[]): Record<string, unknown>[] {
   return images.map((img) => ({
     page_url: img.page_url,
     src: img.src,
@@ -201,10 +208,10 @@ function imagesRows(images) {
 
 /**
  * Builds rows for internal-links.csv from the links table.
- * @param {Object[]} links - Internal link rows for a session (is_external = 0).
- * @returns {Array<{ source_url: string, target_url: string, anchor_text: string }>}
+ * @param links - Internal link rows for a session (is_external = 0).
+ * @returns One row per link with source_url, target_url, anchor_text.
  */
-function internalLinksRows(links) {
+export function internalLinksRows(links: DbLink[]): Record<string, unknown>[] {
   return links.map((l) => ({
     source_url: l.source_url,
     target_url: l.target_url,
@@ -214,10 +221,10 @@ function internalLinksRows(links) {
 
 /**
  * Builds rows for indexability.csv — only non-indexable crawled HTML pages.
- * @param {Object[]} htmlPages - Crawled HTML pages only (pre-filtered by caller).
- * @returns {Array<{ url: string, is_indexable: 0, reason: string }>}
+ * @param htmlPages - Crawled HTML pages only (pre-filtered by caller).
+ * @returns One row per non-indexable page with url, is_indexable, and reason.
  */
-function indexabilityRows(htmlPages) {
+export function indexabilityRows(htmlPages: Page[]): Record<string, unknown>[] {
   return htmlPages
     .filter((p) => p.is_indexable === 0)
     .map((p) => {
@@ -236,10 +243,10 @@ function indexabilityRows(htmlPages) {
 /**
  * Builds rows for sitemap-coverage.csv — only URLs where sitemap membership and crawl status diverge.
  * Excludes URLs that are both in the sitemap and successfully crawled (no discrepancy).
- * @param {Object[]} pages - All pages rows for a session.
- * @returns {Array<{ url: string, in_sitemap: 0|1, status: string, issue: 'in_sitemap_not_crawled'|'crawled_not_in_sitemap' }>}
+ * @param pages - All pages rows for a session.
+ * @returns One row per discrepancy with url, in_sitemap, status, and issue classification.
  */
-function sitemapCoverageRows(pages) {
+export function sitemapCoverageRows(pages: Page[]): Record<string, unknown>[] {
   return pages
     .filter(
       (p) =>
@@ -263,40 +270,40 @@ function sitemapCoverageRows(pages) {
  *   missing_meta_description, meta_description_too_long, duplicate_meta_description,
  *   missing_h1, multiple_h1, noindex, missing_canonical, canonical_mismatch,
  *   images_missing_alt, images_empty_alt, redirect, broken, fetch_error.
- * @param {Object[]} pages - All pages rows for a session.
- * @returns {Array<{ url: string, issue: string, detail: string }>}
+ * @param pages - All pages rows for a session.
+ * @returns One row per issue found, with url, issue type, and detail.
  */
-function issuesSummaryRows(pages) {
+export function issuesSummaryRows(pages: Page[]): Record<string, unknown>[] {
   const htmlPages = pages.filter(
     (p) => p.status === 'crawled' && p.content_type?.includes('text/html')
   );
   const titleCounts = buildDuplicateMap(htmlPages, (p) => p.title);
   const descCounts = buildDuplicateMap(htmlPages, (p) => p.meta_description);
 
-  const rows = [];
+  const rows: Record<string, unknown>[] = [];
   for (const p of pages) {
     const isHtml = p.status === 'crawled' && p.content_type?.includes('text/html');
 
     if (isHtml) {
       if (p.title === null) rows.push({ url: p.url, issue: 'missing_title', detail: '' });
-      else if (p.title_length > 60)
+      else if ((p.title_length ?? 0) > 60)
         rows.push({ url: p.url, issue: 'title_too_long', detail: `${p.title_length} chars` });
-      else if (p.title_length < 30)
+      else if ((p.title_length ?? 0) < 30)
         rows.push({ url: p.url, issue: 'title_too_short', detail: `${p.title_length} chars` });
 
-      if (p.title && titleCounts.get(p.title) > 1)
+      if (p.title && (titleCounts.get(p.title) ?? 0) > 1)
         rows.push({ url: p.url, issue: 'duplicate_title', detail: p.title });
 
       if (p.meta_description === null)
         rows.push({ url: p.url, issue: 'missing_meta_description', detail: '' });
-      else if (p.meta_desc_length > 160)
+      else if ((p.meta_desc_length ?? 0) > 160)
         rows.push({
           url: p.url,
           issue: 'meta_description_too_long',
           detail: `${p.meta_desc_length} chars`,
         });
 
-      if (p.meta_description && descCounts.get(p.meta_description) > 1)
+      if (p.meta_description && (descCounts.get(p.meta_description) ?? 0) > 1)
         rows.push({
           url: p.url,
           issue: 'duplicate_meta_description',
@@ -333,14 +340,14 @@ function issuesSummaryRows(pages) {
         });
     }
 
-    if (p.status_code >= 300 && p.status_code < 400)
+    if ((p.status_code ?? 0) >= 300 && (p.status_code ?? 0) < 400)
       rows.push({
         url: p.url,
         issue: 'redirect',
         detail: `${p.status_code} → ${p.redirect_url || ''}`,
       });
 
-    if (p.status_code >= 400)
+    if ((p.status_code ?? 0) >= 400)
       rows.push({ url: p.url, issue: 'broken', detail: `HTTP ${p.status_code}` });
 
     if (p.status === 'error' && p.error_message)
@@ -352,14 +359,14 @@ function issuesSummaryRows(pages) {
 /**
  * Compares two sessions and returns rows describing field changes, new pages, and removed pages.
  * Compares the fields listed in DIFF_FIELDS (module-level constant).
- * @param {Object[]} pagesA - Pages from the earlier (baseline) session.
- * @param {Object[]} pagesB - Pages from the later session.
- * @returns {Array<{ url: string, change_type: 'changed'|'new_page'|'removed_page', field: string, session_a_value: string, session_b_value: string }>}
+ * @param pagesA - Pages from the earlier (baseline) session.
+ * @param pagesB - Pages from the later session.
+ * @returns One row per change, with url, change_type, field, and both session values.
  */
-function diffRows(pagesA, pagesB) {
+export function diffRows(pagesA: Page[], pagesB: Page[]): Record<string, unknown>[] {
   const mapA = new Map(pagesA.map((p) => [p.url, p]));
   const mapB = new Map(pagesB.map((p) => [p.url, p]));
-  const rows = [];
+  const rows: Record<string, unknown>[] = [];
 
   for (const [url, b] of mapB) {
     const a = mapA.get(url);
@@ -402,12 +409,12 @@ function diffRows(pagesA, pagesB) {
 /**
  * Generates all 11 CSV reports for a session and writes them to `outDir`.
  * Creates `outDir` if it does not exist.
- * @param {Db} db
- * @param {number} sessionId
- * @param {string} outDir - Directory to write CSV files into.
- * @returns {Promise<void>}
+ * @param db - The Db instance for the site.
+ * @param sessionId - The session to report on.
+ * @param outDir - Directory to write CSV files into.
+ * @returns Resolves when all files are written.
  */
-async function generateReports(db, sessionId, outDir) {
+export async function generateReports(db: Db, sessionId: number, outDir: string): Promise<void> {
   fs.mkdirSync(outDir, { recursive: true });
 
   const pages = db.getPages(sessionId);
@@ -434,11 +441,11 @@ async function generateReports(db, sessionId, outDir) {
 
 /**
  * Prints a text summary of a completed session to stdout.
- * @param {Db} db
- * @param {number} sessionId
- * @param {string} outDir - Path where reports were written (included in output).
+ * @param db - The Db instance for the site.
+ * @param sessionId - The session to summarize.
+ * @param outDir - Path where reports were written (included in output).
  */
-function printSummary(db, sessionId, outDir) {
+export function printSummary(db: Db, sessionId: number, outDir: string): void {
   const session = db.getSession(sessionId);
   const pages = db.getPages(sessionId);
   const htmlPages = pages.filter(
@@ -446,13 +453,13 @@ function printSummary(db, sessionId, outDir) {
   );
 
   const crawled = pages.filter((p) => p.status === 'crawled').length;
-  const broken = pages.filter((p) => p.status_code >= 400).length;
+  const broken = pages.filter((p) => (p.status_code ?? 0) >= 400).length;
   const missingTitles = htmlPages.filter((p) => p.title === null).length;
   const noindex = htmlPages.filter((p) => p.is_indexable === 0).length;
 
   let duration = '';
   if (session?.started_at && session?.completed_at) {
-    const ms = new Date(session.completed_at) - new Date(session.started_at);
+    const ms = new Date(session.completed_at).getTime() - new Date(session.started_at).getTime();
     const mins = Math.floor(ms / 60000);
     const secs = Math.floor((ms % 60000) / 1000);
     duration = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
@@ -473,13 +480,18 @@ function printSummary(db, sessionId, outDir) {
 // Main entry point
 // ---------------------------------------------------------------------------
 
+/** Options passed to report(). */
+interface ReportOptions {
+  args?: ReportArgs;
+}
+
 /**
  * Main report entry point.
  * Throws on invalid arguments rather than calling process.exit().
- * @param {{ args?: Object }} [opts]
- * @returns {Promise<void>}
+ * @param opts - Optional pre-parsed args (useful for tests).
+ * @returns Resolves when reporting is complete.
  */
-async function report(opts = {}) {
+export async function report(opts: ReportOptions = {}): Promise<void> {
   const args = opts.args || parseArgs(process.argv.slice(2));
 
   if (!args.site) {
@@ -522,7 +534,7 @@ async function report(opts = {}) {
       return;
     }
 
-    let sessionId;
+    let sessionId: number;
     if (args.session !== null) {
       sessionId = args.session;
     } else {
@@ -539,29 +551,10 @@ async function report(opts = {}) {
   }
 }
 
-module.exports = {
-  parseArgs,
-  writeCsv,
-  buildDuplicateMap,
-  allPagesRows,
-  pageTitlesRows,
-  metaDescriptionsRows,
-  h1TagsRows,
-  canonicalsRows,
-  redirectsRows,
-  imagesRows,
-  internalLinksRows,
-  indexabilityRows,
-  sitemapCoverageRows,
-  issuesSummaryRows,
-  diffRows,
-  generateReports,
-  report,
-};
-
 if (require.main === module) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('dotenv').config();
-  report().catch((err) => {
+  report().catch((err: Error) => {
     console.error('Fatal error:', err.message);
     process.exit(1);
   });

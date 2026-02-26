@@ -1,9 +1,7 @@
-'use strict';
-
-const { test, mock, afterEach } = require('node:test');
-const assert = require('node:assert/strict');
-const axios = require('axios');
-const robots = require('../src/robots');
+import { test, mock, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import axios from 'axios';
+import robots from '../src/robots';
 
 afterEach(() => mock.restoreAll());
 

@@ -1,14 +1,12 @@
-'use strict';
-
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const Db = require('../src/db');
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import Db from '../src/db';
 
 const HOSTNAME = '_test.db.local';
 const SITE_URL = 'https://_test.db.local';
-let db;
+let db: Db;
 
 before(() => {
   db = new Db(HOSTNAME);
@@ -90,7 +88,7 @@ test('markPageCrawled removes page from pending and writes seo data', () => {
     page_size_bytes: 1024,
   });
   assert.equal(db.getPendingUrls(sid).length, 0);
-  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url);
+  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url) as { status: string; title: string; status_code: number };
   assert.equal(row.status, 'crawled');
   assert.equal(row.title, 'Test Page');
   assert.equal(row.status_code, 200);
@@ -101,7 +99,7 @@ test('markPageError sets status to error', () => {
   const url = `${SITE_URL}/broken`;
   db.upsertPage(sid, { url, depth: 0 });
   db.markPageError(sid, url, 404, 'Not Found');
-  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url);
+  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url) as { status: string; status_code: number; error_message: string };
   assert.equal(row.status, 'error');
   assert.equal(row.status_code, 404);
   assert.equal(row.error_message, 'Not Found');
@@ -112,7 +110,7 @@ test('markPageSkipped sets status to skipped', () => {
   const url = `${SITE_URL}/disallowed`;
   db.upsertPage(sid, { url, depth: 0 });
   db.markPageSkipped(sid, url, 'disallowed by robots.txt');
-  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url);
+  const row = db.db.prepare('SELECT * FROM pages WHERE session_id = ? AND url = ?').get(sid, url) as { status: string; error_message: string };
   assert.equal(row.status, 'skipped');
   assert.equal(row.error_message, 'disallowed by robots.txt');
 });
@@ -147,7 +145,7 @@ test('updateSessionStatus complete sets total_pages and completed_at', () => {
     page_size_bytes: 512,
   });
   db.updateSessionStatus(sid, 'complete');
-  const session = db.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sid);
+  const session = db.db.prepare('SELECT * FROM sessions WHERE id = ?').get(sid) as { status: string; total_pages: number; completed_at: string };
   assert.equal(session.status, 'complete');
   assert.equal(session.total_pages, 1);
   assert.ok(session.completed_at);
@@ -157,8 +155,8 @@ test('getLatestInterruptedSession returns most recent interrupted session', () =
   const sid = db.createSession(SITE_URL, 'interrupted-test');
   db.updateSessionStatus(sid, 'interrupted');
   const session = db.getLatestInterruptedSession();
-  assert.equal(session.id, sid);
-  assert.equal(session.status, 'interrupted');
+  assert.equal(session!.id, sid);
+  assert.equal(session!.status, 'interrupted');
 });
 
 test('insertLinks bulk inserts within a transaction', () => {
@@ -177,7 +175,7 @@ test('insertLinks bulk inserts within a transaction', () => {
       is_external: true,
     },
   ]);
-  const links = db.db.prepare('SELECT * FROM links WHERE session_id = ?').all(sid);
+  const links = db.db.prepare('SELECT * FROM links WHERE session_id = ?').all(sid) as { is_external: number }[];
   assert.equal(links.length, 2);
   assert.equal(links[1].is_external, 1);
 });
@@ -185,8 +183,8 @@ test('insertLinks bulk inserts within a transaction', () => {
 test('getSession returns the session by ID', () => {
   const sid = db.createSession(SITE_URL, 'get-session-test');
   const session = db.getSession(sid);
-  assert.equal(session.id, sid);
-  assert.equal(session.label, 'get-session-test');
+  assert.equal(session!.id, sid);
+  assert.equal(session!.label, 'get-session-test');
 });
 
 test('getSession returns undefined for unknown ID', () => {
@@ -231,7 +229,7 @@ test('insertImages bulk inserts within a transaction', () => {
     { page_url: `${SITE_URL}/`, src: '/img/logo.png', alt: 'Logo' },
     { page_url: `${SITE_URL}/`, src: '/img/hero.jpg', alt: '' },
   ]);
-  const images = db.db.prepare('SELECT * FROM images WHERE session_id = ?').all(sid);
+  const images = db.db.prepare('SELECT * FROM images WHERE session_id = ?').all(sid) as { alt: string }[];
   assert.equal(images.length, 2);
   assert.equal(images[0].alt, 'Logo');
 });

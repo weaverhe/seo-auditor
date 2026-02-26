@@ -1,12 +1,10 @@
-'use strict';
-
-const { test, before, after } = require('node:test');
-const assert = require('node:assert/strict');
-const fs = require('fs');
-const path = require('path');
-const fastcsv = require('fast-csv');
-const Db = require('../src/db');
-const {
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import * as fastcsv from 'fast-csv';
+import Db from '../src/db';
+import {
   parseArgs,
   buildDuplicateMap,
   allPagesRows,
@@ -23,23 +21,19 @@ const {
   diffRows,
   generateReports,
   report,
-} = require('../src/report');
+} from '../src/report';
+import type { Page, DbImage, DbLink } from '../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Parses a CSV file and returns all rows as an array of plain objects.
- * @param {string} filePath
- * @returns {Promise<Object[]>}
- */
-function readCsv(filePath) {
+function readCsv(filePath: string): Promise<Record<string, string>[]> {
   return new Promise((resolve, reject) => {
-    const rows = [];
+    const rows: Record<string, string>[] = [];
     fastcsv
       .parseFile(filePath, { headers: true })
-      .on('data', (row) => rows.push(row))
+      .on('data', (row: Record<string, string>) => rows.push(row))
       .on('end', () => resolve(rows))
       .on('error', reject);
   });
@@ -107,7 +101,9 @@ test('buildDuplicateMap: excludes null and empty string keys', () => {
 // Row generator fixtures
 // ---------------------------------------------------------------------------
 
-const HTML_PAGE = {
+const HTML_PAGE: Page = {
+  id: 1,
+  session_id: 1,
   url: 'https://example.com/',
   status: 'crawled',
   status_code: 200,
@@ -129,9 +125,17 @@ const HTML_PAGE = {
   in_sitemap: 1,
   redirect_url: null,
   error_message: null,
+  crawled_at: null,
+  word_count: 0,
+  internal_link_count: 0,
+  external_link_count: 0,
+  image_count: 0,
+  has_schema: 0,
+  response_time_ms: null,
+  page_size_bytes: null,
 };
 
-const REDIRECT_PAGE = {
+const REDIRECT_PAGE: Page = {
   ...HTML_PAGE,
   url: 'https://example.com/old',
   status: 'crawled',
@@ -149,7 +153,7 @@ const REDIRECT_PAGE = {
   in_sitemap: 0,
 };
 
-const BROKEN_PAGE = {
+const BROKEN_PAGE: Page = {
   ...HTML_PAGE,
   url: 'https://example.com/gone',
   status: 'error',
@@ -193,15 +197,15 @@ test('allPagesRows: fills empty string for null fields', () => {
 // ---------------------------------------------------------------------------
 
 test('pageTitlesRows: marks missing title', () => {
-  const page = { ...HTML_PAGE, title: null, title_length: null };
+  const page: Page = { ...HTML_PAGE, title: null, title_length: null };
   const rows = pageTitlesRows([page]);
   assert.equal(rows[0].missing, 1);
   assert.equal(rows[0].title, '');
 });
 
 test('pageTitlesRows: marks duplicate titles across pages', () => {
-  const p1 = { ...HTML_PAGE, url: 'https://example.com/a' };
-  const p2 = { ...HTML_PAGE, url: 'https://example.com/b' };
+  const p1: Page = { ...HTML_PAGE, url: 'https://example.com/a' };
+  const p2: Page = { ...HTML_PAGE, url: 'https://example.com/b' };
   const rows = pageTitlesRows([p1, p2]);
   assert.equal(rows[0].duplicate, 1);
   assert.equal(rows[1].duplicate, 1);
@@ -217,14 +221,14 @@ test('pageTitlesRows: unique title is not marked duplicate', () => {
 // ---------------------------------------------------------------------------
 
 test('metaDescriptionsRows: marks missing meta description', () => {
-  const page = { ...HTML_PAGE, meta_description: null, meta_desc_length: null };
+  const page: Page = { ...HTML_PAGE, meta_description: null, meta_desc_length: null };
   const rows = metaDescriptionsRows([page]);
   assert.equal(rows[0].missing, 1);
 });
 
 test('metaDescriptionsRows: marks duplicate meta descriptions', () => {
-  const p1 = { ...HTML_PAGE, url: 'https://example.com/a' };
-  const p2 = { ...HTML_PAGE, url: 'https://example.com/b' };
+  const p1: Page = { ...HTML_PAGE, url: 'https://example.com/a' };
+  const p2: Page = { ...HTML_PAGE, url: 'https://example.com/b' };
   const rows = metaDescriptionsRows([p1, p2]);
   assert.equal(rows[0].duplicate, 1);
   assert.equal(rows[1].duplicate, 1);
@@ -259,13 +263,13 @@ test('canonicalsRows: type is self when canonical matches url', () => {
 });
 
 test('canonicalsRows: type is points-elsewhere when canonical differs', () => {
-  const page = { ...HTML_PAGE, canonical_url: 'https://example.com/other' };
+  const page: Page = { ...HTML_PAGE, canonical_url: 'https://example.com/other' };
   const rows = canonicalsRows([page]);
   assert.equal(rows[0].type, 'points-elsewhere');
 });
 
 test('canonicalsRows: type is missing when canonical is null', () => {
-  const page = { ...HTML_PAGE, canonical_url: null };
+  const page: Page = { ...HTML_PAGE, canonical_url: null };
   const rows = canonicalsRows([page]);
   assert.equal(rows[0].type, 'missing');
 });
@@ -291,7 +295,7 @@ test('redirectsRows: returns empty array when no redirects', () => {
 // ---------------------------------------------------------------------------
 
 test('imagesRows: flags missing_alt for null alt', () => {
-  const img = { page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: null };
+  const img: DbImage = { id: 1, session_id: 1, page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: null };
   const rows = imagesRows([img]);
   assert.equal(rows[0].missing_alt, 1);
   assert.equal(rows[0].empty_alt, 0);
@@ -299,14 +303,14 @@ test('imagesRows: flags missing_alt for null alt', () => {
 });
 
 test('imagesRows: flags empty_alt for empty string alt', () => {
-  const img = { page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: '' };
+  const img: DbImage = { id: 1, session_id: 1, page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: '' };
   const rows = imagesRows([img]);
   assert.equal(rows[0].missing_alt, 0);
   assert.equal(rows[0].empty_alt, 1);
 });
 
 test('imagesRows: neither flag set when alt has text', () => {
-  const img = { page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: 'Logo' };
+  const img: DbImage = { id: 1, session_id: 1, page_url: 'https://example.com/', src: 'https://example.com/img.jpg', alt: 'Logo' };
   const rows = imagesRows([img]);
   assert.equal(rows[0].missing_alt, 0);
   assert.equal(rows[0].empty_alt, 0);
@@ -317,7 +321,9 @@ test('imagesRows: neither flag set when alt has text', () => {
 // ---------------------------------------------------------------------------
 
 test('internalLinksRows: maps source, target, anchor_text', () => {
-  const link = {
+  const link: DbLink = {
+    id: 1,
+    session_id: 1,
     source_url: 'https://example.com/',
     target_url: 'https://example.com/about',
     anchor_text: 'About',
@@ -334,7 +340,7 @@ test('internalLinksRows: maps source, target, anchor_text', () => {
 // ---------------------------------------------------------------------------
 
 test('indexabilityRows: only includes is_indexable = 0 pages', () => {
-  const noindex = {
+  const noindex: Page = {
     ...HTML_PAGE,
     is_indexable: 0,
     robots_directive: 'noindex, follow',
@@ -347,7 +353,7 @@ test('indexabilityRows: only includes is_indexable = 0 pages', () => {
 });
 
 test('indexabilityRows: reason includes x-robots-tag when present', () => {
-  const page = { ...HTML_PAGE, is_indexable: 0, robots_directive: null, x_robots_tag: 'noindex' };
+  const page: Page = { ...HTML_PAGE, is_indexable: 0, robots_directive: null, x_robots_tag: 'noindex' };
   const rows = indexabilityRows([page]);
   assert.equal(rows[0].reason, 'x-robots-tag');
 });
@@ -357,14 +363,14 @@ test('indexabilityRows: reason includes x-robots-tag when present', () => {
 // ---------------------------------------------------------------------------
 
 test('sitemapCoverageRows: reports in_sitemap_not_crawled', () => {
-  const page = { ...HTML_PAGE, in_sitemap: 1, status: 'error' };
+  const page: Page = { ...HTML_PAGE, in_sitemap: 1, status: 'error' };
   const rows = sitemapCoverageRows([page]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].issue, 'in_sitemap_not_crawled');
 });
 
 test('sitemapCoverageRows: reports crawled_not_in_sitemap', () => {
-  const page = { ...HTML_PAGE, in_sitemap: 0, status: 'crawled' };
+  const page: Page = { ...HTML_PAGE, in_sitemap: 0, status: 'crawled' };
   const rows = sitemapCoverageRows([page]);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].issue, 'crawled_not_in_sitemap');
@@ -380,25 +386,25 @@ test('sitemapCoverageRows: excludes pages that are in sitemap and crawled', () =
 // ---------------------------------------------------------------------------
 
 test('issuesSummaryRows: reports missing_title', () => {
-  const page = { ...HTML_PAGE, title: null, title_length: null };
+  const page: Page = { ...HTML_PAGE, title: null, title_length: null };
   const rows = issuesSummaryRows([page]);
   assert.ok(rows.some((r) => r.issue === 'missing_title'));
 });
 
 test('issuesSummaryRows: reports title_too_long', () => {
-  const page = { ...HTML_PAGE, title: 'A'.repeat(65), title_length: 65 };
+  const page: Page = { ...HTML_PAGE, title: 'A'.repeat(65), title_length: 65 };
   const rows = issuesSummaryRows([page]);
   assert.ok(rows.some((r) => r.issue === 'title_too_long'));
 });
 
 test('issuesSummaryRows: reports missing_h1', () => {
-  const page = { ...HTML_PAGE, h1: null, h1_count: 0 };
+  const page: Page = { ...HTML_PAGE, h1: null, h1_count: 0 };
   const rows = issuesSummaryRows([page]);
   assert.ok(rows.some((r) => r.issue === 'missing_h1'));
 });
 
 test('issuesSummaryRows: reports noindex', () => {
-  const page = { ...HTML_PAGE, is_indexable: 0, robots_directive: 'noindex' };
+  const page: Page = { ...HTML_PAGE, is_indexable: 0, robots_directive: 'noindex' };
   const rows = issuesSummaryRows([page]);
   assert.ok(rows.some((r) => r.issue === 'noindex'));
 });
@@ -414,15 +420,15 @@ test('issuesSummaryRows: reports broken for 4xx pages', () => {
 });
 
 test('issuesSummaryRows: reports duplicate_title across pages', () => {
-  const p1 = { ...HTML_PAGE, url: 'https://example.com/a' };
-  const p2 = { ...HTML_PAGE, url: 'https://example.com/b' };
+  const p1: Page = { ...HTML_PAGE, url: 'https://example.com/a' };
+  const p2: Page = { ...HTML_PAGE, url: 'https://example.com/b' };
   const rows = issuesSummaryRows([p1, p2]);
   const dupes = rows.filter((r) => r.issue === 'duplicate_title');
   assert.equal(dupes.length, 2);
 });
 
 test('issuesSummaryRows: no issues for a clean page', () => {
-  const clean = {
+  const clean: Page = {
     ...HTML_PAGE,
     title: 'A well-formed page title here ok',
     title_length: 33,
@@ -443,8 +449,8 @@ test('issuesSummaryRows: no issues for a clean page', () => {
 // ---------------------------------------------------------------------------
 
 test('diffRows: detects changed field values', () => {
-  const a = [{ ...HTML_PAGE, title: 'Old Title' }];
-  const b = [{ ...HTML_PAGE, title: 'New Title' }];
+  const a: Page[] = [{ ...HTML_PAGE, title: 'Old Title' }];
+  const b: Page[] = [{ ...HTML_PAGE, title: 'New Title' }];
   const rows = diffRows(a, b);
   const titleChange = rows.find((r) => r.field === 'title');
   assert.ok(titleChange);
@@ -477,9 +483,9 @@ test('diffRows: returns empty array when sessions are identical', () => {
 
 const REPORT_HOSTNAME = '_test.report.local';
 const REPORT_SITE = `https://${REPORT_HOSTNAME}`;
-let reportDb;
-let reportSessionId;
-let reportOutDir;
+let reportDb: Db;
+let reportSessionId: number;
+let reportOutDir: string;
 
 before(() => {
   reportDb = new Db(REPORT_HOSTNAME);

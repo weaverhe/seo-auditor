@@ -1,18 +1,24 @@
-'use strict';
-
-const axios = require('axios');
-const { analyze } = require('./analyze');
-const robots = require('./robots');
-const sitemap = require('./sitemap');
-const Db = require('./db');
-const { loadConfig } = require('./config');
+import axios from 'axios';
+import { analyze } from './analyze';
+import Db from './db';
+// require().default is used for robots and sitemap so that mock.method() in tests patches
+// the same plain-object default export that this module holds. esbuild compiles named
+// exports as non-configurable getters; properties on a default-exported plain object are
+// ordinary value properties (configurable: true), which mock.method can replace.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const robots = require('./robots').default as typeof import('./robots').default;
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const sitemap = require('./sitemap').default as typeof import('./sitemap').default;
+import { loadConfig } from './config';
+import type { Config, PageData, RobotsData } from './types';
 
 /**
  * Returns a baseline page data object for pages that can't be parsed as HTML.
  * Pass overrides for fields specific to the response type.
- * @param {Object} overrides
+ * @param overrides - Fields to override from the baseline defaults.
+ * @returns A fully-populated PageData object.
  */
-function emptyPage(overrides = {}) {
+function emptyPage(overrides: Partial<PageData> = {}): PageData {
   return {
     redirect_url: null,
     content_type: null,
@@ -36,17 +42,25 @@ function emptyPage(overrides = {}) {
     has_schema: 0,
     response_time_ms: null,
     page_size_bytes: null,
+    status_code: null,
     ...overrides,
   };
 }
 
+/** Parsed crawler CLI arguments. */
+export interface ParsedArgs {
+  site: string | null;
+  label: string | null;
+  resume: boolean;
+}
+
 /**
  * Parses crawler flags from an args array (pass process.argv.slice(2)).
- * @param {string[]} args
- * @returns {{ site: string|null, label: string|null, resume: boolean }}
+ * @param args - Raw CLI argument strings.
+ * @returns Parsed flag values.
  */
-function parseArgs(args) {
-  const result = { site: null, label: null, resume: false };
+export function parseArgs(args: string[]): ParsedArgs {
+  const result: ParsedArgs = { site: null, label: null, resume: false };
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '--site') result.site = args[++i];
     else if (args[i] === '--label') result.label = args[++i];
@@ -55,14 +69,26 @@ function parseArgs(args) {
   return result;
 }
 
+export { loadConfig };
+
+/** Result of a single HTTP fetch attempt. */
+interface FetchResult {
+  status: number | null;
+  headers: Record<string, string>;
+  data: string | null;
+  redirectUrl: string | null;
+  responseTimeMs: number;
+  error: string | null;
+}
+
 /**
  * Fetches a single URL without following redirects.
  * Returns a normalized result regardless of outcome — never throws.
- * @param {string} url
- * @param {{ requestTimeoutMs: number, userAgent: string }} config
- * @returns {Promise<{ status: number|null, headers: Object, data: string|null, redirectUrl: string|null, responseTimeMs: number, error: string|null }>}
+ * @param url - The URL to fetch.
+ * @param config - Crawler config (timeout, user agent).
+ * @returns Normalized fetch result including status, headers, body, and timing.
  */
-async function fetchPage(url, config) {
+export async function fetchPage(url: string, config: Config): Promise<FetchResult> {
   const start = Date.now();
   try {
     const response = await axios.get(url, {
@@ -74,21 +100,22 @@ async function fetchPage(url, config) {
     });
     return {
       status: response.status,
-      headers: response.headers,
-      data: response.data,
+      headers: response.headers as Record<string, string>,
+      data: response.data as string,
       redirectUrl: null,
       responseTimeMs: Date.now() - start,
       error: null,
     };
   } catch (err) {
     const responseTimeMs = Date.now() - start;
+    const axiosErr = err as { response?: { status: number; headers: Record<string, string> } };
     // axios throws MaxRedirectsError when server sends a redirect and maxRedirects: 0
-    if (err.response && err.response.status >= 300 && err.response.status < 400) {
+    if (axiosErr.response && axiosErr.response.status >= 300 && axiosErr.response.status < 400) {
       return {
-        status: err.response.status,
-        headers: err.response.headers,
+        status: axiosErr.response.status,
+        headers: axiosErr.response.headers,
         data: null,
-        redirectUrl: err.response.headers['location'] || null,
+        redirectUrl: axiosErr.response.headers['location'] || null,
         responseTimeMs,
         error: null,
       };
@@ -99,21 +126,40 @@ async function fetchPage(url, config) {
       data: null,
       redirectUrl: null,
       responseTimeMs,
-      error: err.message,
+      error: (err as Error).message,
     };
   }
+}
+
+/** Shared context passed to every processUrl call and the worker pool. */
+interface CrawlContext {
+  db: Db;
+  sessionId: number;
+  robotsData: RobotsData;
+  crawlDelay: number | null;
+  config: Config;
+}
+
+/** Mutable state shared across the worker pool for graceful shutdown. */
+interface CrawlState {
+  shuttingDown: boolean;
 }
 
 /**
  * Starts a new crawl session: creates DB record, fetches robots.txt and sitemap,
  * seeds the queue with sitemap URLs and the site root.
- * @param {Db} db
- * @param {string} siteUrl
- * @param {string|null} label
- * @param {Object} config
- * @returns {Promise<{ sessionId: number, robotsData: Object, seen: Set, queue: Array }>}
+ * @param db - The Db instance for this site.
+ * @param siteUrl - Root URL of the site to crawl.
+ * @param label - Optional human-readable label for the session.
+ * @param config - Crawler configuration.
+ * @returns Session ID, parsed robots data, dedup set, and initial URL queue.
  */
-async function initSession(db, siteUrl, label, config) {
+export async function initSession(
+  db: Db,
+  siteUrl: string,
+  label: string | null,
+  config: Config
+): Promise<{ sessionId: number; robotsData: RobotsData; seen: Set<string>; queue: { url: string; depth: number }[] }> {
   const sessionId = db.createSession(siteUrl, label || null);
   console.log(`Starting session ${sessionId} for ${new URL(siteUrl).hostname}...`);
 
@@ -124,8 +170,8 @@ async function initSession(db, siteUrl, label, config) {
   const sitemapUrls = await sitemap.getUrls(siteUrl, robotsData.getSitemapUrls(), config);
   console.log(`Found ${sitemapUrls.length} URL(s) in sitemap`);
 
-  const seen = new Set();
-  const queue = [];
+  const seen = new Set<string>();
+  const queue: { url: string; depth: number }[] = [];
 
   for (const url of sitemapUrls) {
     if (!seen.has(url)) {
@@ -150,11 +196,14 @@ async function initSession(db, siteUrl, label, config) {
 /**
  * Resumes an interrupted session: reloads pending URLs into the queue and
  * seeds `seen` from all page URLs and link targets discovered before interruption.
- * @param {Db} db
- * @param {Object} config
- * @returns {Promise<{ sessionId: number, robotsData: Object, seen: Set, queue: Array }>}
+ * @param db - The Db instance for this site.
+ * @param config - Crawler configuration.
+ * @returns Session ID, parsed robots data, dedup set, and pending URL queue.
  */
-async function resumeSession(db, config) {
+export async function resumeSession(
+  db: Db,
+  config: Config
+): Promise<{ sessionId: number; robotsData: RobotsData; seen: Set<string>; queue: { url: string; depth: number }[] }> {
   const interrupted = db.getLatestInterruptedSession();
   if (!interrupted) throw new Error('No interrupted session found');
 
@@ -166,7 +215,7 @@ async function resumeSession(db, config) {
 
   // Seed seen from all known page URLs and all link targets discovered before
   // interruption, so we don't re-queue URLs that were already found.
-  const seen = new Set();
+  const seen = new Set<string>();
   db.getAllPageUrls(sessionId).forEach((url) => seen.add(url));
   db.getLinkTargetUrls(sessionId).forEach((url) => seen.add(url));
 
@@ -179,12 +228,16 @@ async function resumeSession(db, config) {
 /**
  * Fetches, analyzes, and persists a single URL.
  * Returns new internal URLs to enqueue, or null.
- * @param {string} url
- * @param {number} depth
- * @param {{ db: Db, sessionId: number, robotsData: Object, config: Object }} ctx
- * @returns {Promise<Array<{ url: string, depth: number }>|null>}
+ * @param url - The URL to process.
+ * @param depth - Crawl depth of this URL.
+ * @param ctx - Shared crawl context (db, session, robots, config).
+ * @returns New internal URLs to enqueue, or null if none.
  */
-async function processUrl(url, depth, ctx) {
+export async function processUrl(
+  url: string,
+  depth: number,
+  ctx: CrawlContext
+): Promise<{ url: string; depth: number }[] | null> {
   const { db, sessionId, robotsData, config } = ctx;
 
   if (!robotsData.isAllowed(url)) {
@@ -193,7 +246,10 @@ async function processUrl(url, depth, ctx) {
     return null;
   }
 
-  const { status, headers, data, redirectUrl, responseTimeMs, error } = await fetchPage(url, config);
+  const { status, headers, data, redirectUrl, responseTimeMs, error } = await fetchPage(
+    url,
+    config
+  );
 
   if (error) {
     db.markPageError(sessionId, url, null, error);
@@ -201,19 +257,23 @@ async function processUrl(url, depth, ctx) {
     return null;
   }
 
-  if (status >= 300 && status < 400) {
+  if (status !== null && status >= 300 && status < 400) {
     const resolvedRedirect = redirectUrl ? new URL(redirectUrl, url).href : null;
-    db.markPageCrawled(sessionId, url, emptyPage({
-      status_code: status,
-      redirect_url: resolvedRedirect,
-      is_indexable: 0,
-      response_time_ms: responseTimeMs,
-    }));
+    db.markPageCrawled(
+      sessionId,
+      url,
+      emptyPage({
+        status_code: status,
+        redirect_url: resolvedRedirect,
+        is_indexable: 0,
+        response_time_ms: responseTimeMs,
+      })
+    );
     console.log(`  ${status}  ${url} → ${resolvedRedirect || '(unknown)'}`);
     return resolvedRedirect ? [{ url: resolvedRedirect, depth }] : null;
   }
 
-  if (status >= 400) {
+  if (status !== null && status >= 400) {
     db.markPageError(sessionId, url, status, `HTTP ${status}`);
     console.log(`  ${status} ${url}`);
     return null;
@@ -225,26 +285,36 @@ async function processUrl(url, depth, ctx) {
 
   if (!isHtml || !data) {
     // is_indexable is null for non-HTML — indexability is not meaningful for PDFs, images, etc.
-    db.markPageCrawled(sessionId, url, emptyPage({
-      status_code: status,
-      content_type: contentType,
-      response_time_ms: responseTimeMs,
-      page_size_bytes: pageSizeBytes,
-    }));
+    db.markPageCrawled(
+      sessionId,
+      url,
+      emptyPage({
+        status_code: status,
+        content_type: contentType,
+        response_time_ms: responseTimeMs,
+        page_size_bytes: pageSizeBytes,
+      })
+    );
     console.log(`  ${status}  ${url} (${contentType || 'unknown type'})`);
     return null;
   }
 
   const { links, images, ...seoFields } = analyze(data, headers, url);
 
-  db.persistPageResult(sessionId, url, emptyPage({
-    status_code: status,
-    redirect_url: null,
-    content_type: contentType,
-    response_time_ms: responseTimeMs,
-    page_size_bytes: pageSizeBytes,
-    ...seoFields,
-  }), links, images);
+  db.persistPageResult(
+    sessionId,
+    url,
+    emptyPage({
+      status_code: status,
+      redirect_url: null,
+      content_type: contentType,
+      response_time_ms: responseTimeMs,
+      page_size_bytes: pageSizeBytes,
+      ...seoFields,
+    }),
+    links,
+    images
+  );
 
   console.log(`  ${status}  ${url} — "${seoFields.title || '(no title)'}"`);
 
@@ -256,18 +326,25 @@ async function processUrl(url, depth, ctx) {
 /**
  * Runs the concurrent worker pool until the queue drains or shutdown is signalled.
  * Keeps up to ctx.config.concurrency fetches in flight at all times.
- * @param {Array} queue
- * @param {Set} seen
- * @param {{ db: Db, sessionId: number, robotsData: Object, crawlDelay: number|null, config: Object }} ctx
- * @param {{ shuttingDown: boolean }} state
+ * @param queue - Mutable queue of URLs to crawl (consumed in place).
+ * @param seen - Set of already-queued URLs for deduplication.
+ * @param ctx - Shared crawl context.
+ * @param state - Mutable shutdown flag checked between dispatches.
+ * @returns Resolves when the queue is empty or shutdown is signalled.
  */
-async function runWorkerPool(queue, seen, ctx, state) {
+export async function runWorkerPool(
+  queue: { url: string; depth: number }[],
+  seen: Set<string>,
+  ctx: CrawlContext,
+  state: CrawlState
+): Promise<void> {
   const { db, sessionId, crawlDelay, config } = ctx;
 
-  await new Promise((poolResolve) => {
+  await new Promise<void>((poolResolve) => {
     let activeWorkers = 0;
     let resolved = false;
 
+    /** Resolves the pool promise exactly once, guarding against double-resolution. */
     function resolve() {
       if (!resolved) {
         resolved = true;
@@ -275,9 +352,10 @@ async function runWorkerPool(queue, seen, ctx, state) {
       }
     }
 
+    /** Fills available worker slots from the queue up to the concurrency limit. */
     function startNext() {
       while (activeWorkers < config.concurrency && queue.length > 0 && !state.shuttingDown) {
-        const { url, depth } = queue.shift();
+        const { url, depth } = queue.shift()!;
         activeWorkers++;
 
         processUrl(url, depth, ctx)
@@ -292,7 +370,7 @@ async function runWorkerPool(queue, seen, ctx, state) {
               }
             }
           })
-          .catch((err) => console.error('Worker error:', err))
+          .catch((err: Error) => console.error('Worker error:', err))
           .finally(() => {
             activeWorkers--;
             // Each worker waits crawlDelay seconds after completing a fetch before
@@ -313,12 +391,19 @@ async function runWorkerPool(queue, seen, ctx, state) {
   });
 }
 
+/** Options passed to crawl(). */
+interface CrawlOptions {
+  args?: ParsedArgs;
+  config?: Config;
+}
+
 /**
  * Main crawl entry point.
  * Throws on invalid arguments rather than calling process.exit().
- * @param {{ args?: Object, config?: Object }} [opts]
+ * @param opts - Optional pre-parsed args and config (useful for tests).
+ * @returns Resolves when the crawl completes.
  */
-async function crawl(opts = {}) {
+export async function crawl(opts: CrawlOptions = {}): Promise<void> {
   const args = opts.args || parseArgs(process.argv.slice(2));
   const config = opts.config || loadConfig();
 
@@ -330,7 +415,7 @@ async function crawl(opts = {}) {
   const hostname = new URL(siteUrl).hostname;
   const db = new Db(hostname);
 
-  let sessionId, robotsData, seen, queue;
+  let sessionId: number, robotsData: RobotsData, seen: Set<string>, queue: { url: string; depth: number }[];
   try {
     if (args.resume) {
       ({ sessionId, robotsData, seen, queue } = await resumeSession(db, config));
@@ -343,8 +428,8 @@ async function crawl(opts = {}) {
   }
 
   const crawlDelay = config.respectCrawlDelay ? robotsData.getCrawlDelay() : null;
-  const ctx = { db, sessionId, robotsData, crawlDelay, config };
-  const state = { shuttingDown: false };
+  const ctx: CrawlContext = { db, sessionId, robotsData, crawlDelay, config };
+  const state: CrawlState = { shuttingDown: false };
 
   const sigintHandler = () => {
     if (state.shuttingDown) return;
@@ -374,11 +459,10 @@ async function crawl(opts = {}) {
   db.close();
 }
 
-module.exports = { parseArgs, loadConfig, fetchPage, processUrl, initSession, resumeSession, runWorkerPool, crawl };
-
 if (require.main === module) {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('dotenv').config();
-  crawl().catch((err) => {
+  crawl().catch((err: Error) => {
     console.error('Fatal error:', err.message);
     process.exit(1);
   });
