@@ -551,9 +551,8 @@ export async function report(opts: ReportOptions = {}): Promise<void> {
   }
 }
 
-if (require.main === module) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('dotenv').config();
+if (process.argv[1] === import.meta.filename) {
+  await import('dotenv/config');
   report().catch((err: Error) => {
     console.error('Fatal error:', err.message);
     process.exit(1);

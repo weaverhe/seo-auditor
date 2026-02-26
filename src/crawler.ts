@@ -1,14 +1,8 @@
 import axios from 'axios';
 import { analyze } from './analyze';
 import Db from './db';
-// require().default is used for robots and sitemap so that mock.method() in tests patches
-// the same plain-object default export that this module holds. esbuild compiles named
-// exports as non-configurable getters; properties on a default-exported plain object are
-// ordinary value properties (configurable: true), which mock.method can replace.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const robots = require('./robots').default as typeof import('./robots').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const sitemap = require('./sitemap').default as typeof import('./sitemap').default;
+import robots from './robots';
+import sitemap from './sitemap';
 import { loadConfig } from './config';
 import type { Config, PageData, RobotsData } from './types';
 
@@ -459,9 +453,8 @@ export async function crawl(opts: CrawlOptions = {}): Promise<void> {
   db.close();
 }
 
-if (require.main === module) {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('dotenv').config();
+if (process.argv[1] === import.meta.filename) {
+  await import('dotenv/config');
   crawl().catch((err: Error) => {
     console.error('Fatal error:', err.message);
     process.exit(1);

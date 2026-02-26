@@ -1,12 +1,10 @@
-'use strict';
+import js from '@eslint/js';
+import globals from 'globals';
+import prettier from 'eslint-config-prettier';
+import tseslint from 'typescript-eslint';
+import jsdoc from 'eslint-plugin-jsdoc';
 
-const js = require('@eslint/js');
-const globals = require('globals');
-const prettier = require('eslint-config-prettier');
-const tseslint = require('typescript-eslint');
-const jsdoc = require('eslint-plugin-jsdoc');
-
-module.exports = tseslint.config(
+export default tseslint.config(
   { ignores: ['node_modules/', 'audits/'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -38,13 +36,6 @@ module.exports = tseslint.config(
     files: ['tests/**/*.test.ts'],
     rules: {
       'jsdoc/require-jsdoc': 'off',
-    },
-  },
-  // CJS config files at the root must use require() — exempt from the no-require-imports rule.
-  {
-    files: ['*.js', '*.cjs'],
-    rules: {
-      '@typescript-eslint/no-require-imports': 'off',
     },
   },
   prettier

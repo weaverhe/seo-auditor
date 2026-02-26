@@ -2,11 +2,12 @@
   "name": "seo-auditor",
   "version": "1.0.0",
   "description": "General-purpose Node.js SEO crawler and audit tool",
+  "type": "module",
   "main": "src/crawler.ts",
   "scripts": {
     "crawl": "tsx src/crawler.ts",
     "report": "tsx src/report.ts",
-    "test": "node --require tsx/cjs --test tests/**/*.test.ts",
+    "test": "node --import tsx --test tests/**/*.test.ts",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write ."

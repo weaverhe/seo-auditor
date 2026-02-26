@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { PageData, LinkData, ImageData, Session, Page, DbImage, DbLink } from '../types';
 
-const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+const schema = fs.readFileSync(path.join(import.meta.dirname, 'schema.sql'), 'utf8');
 
 /**
  * Manages all interactions with a site's SQLite database.

@@ -6,14 +6,8 @@ import axios from 'axios';
 import Db from '../src/db';
 import { parseArgs, loadConfig, fetchPage, processUrl, crawl } from '../src/crawler';
 import type { Config, RobotsData } from '../src/types';
-// require().default matches how crawler.ts imports these modules — ensures mock.method
-// patches the same plain-object default export that crawler.ts holds. Named exports from
-// esbuild are non-configurable getters; properties on a plain default-exported object are
-// ordinary value properties (configurable: true) that mock.method can replace.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const robots = require('../src/robots').default as typeof import('../src/robots').default;
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const sitemap = require('../src/sitemap').default as typeof import('../src/sitemap').default;
+import robots from '../src/robots';
+import sitemap from '../src/sitemap';
 
 const TEST_CONFIG: Config = {
   concurrency: 2,
