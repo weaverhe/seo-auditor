@@ -4,6 +4,8 @@ export interface Config {
   requestTimeoutMs: number;
   userAgent: string;
   respectCrawlDelay: boolean;
+  maxRetries: number;
+  retryBaseDelayMs: number;
 }
 
 /**

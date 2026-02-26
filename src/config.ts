@@ -12,5 +12,7 @@ export function loadConfig(): Config {
     requestTimeoutMs: parseInt(process.env.REQUEST_TIMEOUT_MS || '15000', 10),
     userAgent: process.env.USER_AGENT || 'Mozilla/5.0 (compatible; SEO-Audit-Bot/1.0)',
     respectCrawlDelay: process.env.RESPECT_CRAWL_DELAY !== 'false',
+    maxRetries: parseInt(process.env.MAX_RETRIES || '3', 10),
+    retryBaseDelayMs: parseInt(process.env.RETRY_BASE_DELAY_MS || '1000', 10),
   };
 }

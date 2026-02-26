@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import axios from 'axios';
 import Db from '../src/db';
-import { parseArgs, loadConfig, fetchPage, processUrl, crawl } from '../src/crawler';
+import { parseArgs, loadConfig, fetchPage, fetchWithRetry, processUrl, crawl } from '../src/crawler';
 import type { Config, RobotsData } from '../src/types';
 import robots from '../src/robots';
 import sitemap from '../src/sitemap';
@@ -14,6 +14,8 @@ const TEST_CONFIG: Config = {
   requestTimeoutMs: 5000,
   userAgent: 'test-bot',
   respectCrawlDelay: false,
+  maxRetries: 3,
+  retryBaseDelayMs: 0,
 };
 
 // --- parseArgs ---
@@ -350,4 +352,107 @@ test('crawl(): throws when --site is not provided', async () => {
     () => crawl({ args: { site: null, label: null, resume: false }, config: TEST_CONFIG }),
     /--site is required/
   );
+});
+
+// --- fetchWithRetry ---
+
+test('fetchWithRetry: retries on 429 and returns 200 on next attempt', async () => {
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    if (calls === 1) return { status: 429, headers: {}, data: 'rate limited' };
+    return { status: 200, headers: { 'content-type': 'text/html' }, data: '<html></html>' };
+  });
+  const result = await fetchWithRetry('https://example.com/', TEST_CONFIG);
+  assert.equal(result.status, 200);
+  assert.equal(calls, 2);
+});
+
+test('fetchWithRetry: retries on 503 and returns 200 on next attempt', async () => {
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    if (calls === 1) return { status: 503, headers: {}, data: 'unavailable' };
+    return { status: 200, headers: { 'content-type': 'text/html' }, data: '<html></html>' };
+  });
+  const result = await fetchWithRetry('https://example.com/', TEST_CONFIG);
+  assert.equal(result.status, 200);
+  assert.equal(calls, 2);
+});
+
+test('fetchWithRetry: does not retry on 404', async () => {
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    return { status: 404, headers: {}, data: 'Not found' };
+  });
+  const result = await fetchWithRetry('https://example.com/', TEST_CONFIG);
+  assert.equal(result.status, 404);
+  assert.equal(calls, 1);
+});
+
+test('fetchWithRetry: respects Retry-After header (integer seconds)', async () => {
+  const capturedDelays: number[] = [];
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    if (calls === 1) return { status: 429, headers: { 'retry-after': '2' }, data: '' };
+    return { status: 200, headers: {}, data: '<html></html>' };
+  });
+  const origSetTimeout = globalThis.setTimeout;
+  const mockedSetTimeout = mock.method(globalThis, 'setTimeout', (fn: () => void, ms: number) => {
+    capturedDelays.push(ms);
+    return origSetTimeout(fn, 0); // execute immediately, no real wait
+  });
+  const config: Config = { ...TEST_CONFIG, retryBaseDelayMs: 500, maxRetries: 1 };
+  const result = await fetchWithRetry('https://example.com/', config);
+  mockedSetTimeout.mock.restore();
+  assert.equal(result.status, 200);
+  assert.equal(calls, 2);
+  // Retry-After: 2 → 2000ms, not retryBaseDelayMs (500ms)
+  assert.equal(capturedDelays.length, 1);
+  assert.equal(capturedDelays[0], 2000);
+});
+
+test('fetchWithRetry: exhausts all retries and returns final 429', async () => {
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    return { status: 429, headers: {}, data: 'rate limited' };
+  });
+  const result = await fetchWithRetry('https://example.com/', TEST_CONFIG);
+  assert.equal(result.status, 429);
+  // initial attempt + maxRetries (3) retries = 4 total calls
+  assert.equal(calls, 4);
+});
+
+test('fetchWithRetry: exponential backoff doubles delay each attempt', async () => {
+  const capturedDelays: number[] = [];
+  let calls = 0;
+  mock.method(axios, 'get', async () => {
+    calls++;
+    return { status: 429, headers: {}, data: 'rate limited' };
+  });
+  const config: Config = {
+    ...TEST_CONFIG,
+    maxRetries: 3,
+    retryBaseDelayMs: 100,
+  };
+  // Wrap setTimeout to capture delays
+  const origSetTimeout = globalThis.setTimeout;
+  const mockedSetTimeout = mock.method(globalThis, 'setTimeout', (fn: () => void, ms: number) => {
+    capturedDelays.push(ms);
+    return origSetTimeout(fn, 0); // execute immediately
+  });
+  await fetchWithRetry('https://example.com/', config);
+  mockedSetTimeout.mock.restore();
+  // initial + 3 retries = 4 total axios calls
+  assert.equal(calls, 4);
+  // attempt 1 → delayMs = 100 * 2^0 = 100
+  // attempt 2 → delayMs = 100 * 2^1 = 200
+  // attempt 3 → delayMs = 100 * 2^2 = 400
+  assert.equal(capturedDelays.length, 3);
+  assert.equal(capturedDelays[0], 100);
+  assert.equal(capturedDelays[1], 200);
+  assert.equal(capturedDelays[2], 400);
 });

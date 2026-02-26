@@ -125,6 +125,44 @@ export async function fetchPage(url: string, config: Config): Promise<FetchResul
   }
 }
 
+/**
+ * Waits for the given number of milliseconds.
+ * @param ms - Duration to wait.
+ * @returns A promise that resolves after ms milliseconds.
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Fetches a URL, retrying on 429 or 503 with exponential backoff.
+ * Respects a `Retry-After` header if present. Gives up after config.maxRetries retries.
+ * @param url - The URL to fetch.
+ * @param config - Crawler config (timeout, user agent, retry settings).
+ * @returns The final fetch result after all retry attempts.
+ */
+export async function fetchWithRetry(url: string, config: Config): Promise<FetchResult> {
+  let attempt = 0;
+  while (true) {
+    const result = await fetchPage(url, config);
+    const shouldRetry = result.status === 429 || result.status === 503;
+    if (!shouldRetry || attempt >= config.maxRetries) return result;
+    attempt++;
+    const retryAfterHeader = result.headers['retry-after'];
+    let delayMs: number;
+    if (retryAfterHeader) {
+      const seconds = parseInt(retryAfterHeader, 10);
+      delayMs = isNaN(seconds)
+        ? Math.max(0, new Date(retryAfterHeader).getTime() - Date.now())
+        : seconds * 1000;
+    } else {
+      delayMs = config.retryBaseDelayMs * Math.pow(2, attempt - 1);
+    }
+    console.log(`  ${result.status}  ${url} — retrying in ${Math.round(delayMs / 1000)}s (attempt ${attempt}/${config.maxRetries})`);
+    await sleep(delayMs);
+  }
+}
+
 /** Shared context passed to every processUrl call and the worker pool. */
 interface CrawlContext {
   db: Db;
@@ -240,7 +278,7 @@ export async function processUrl(
     return null;
   }
 
-  const { status, headers, data, redirectUrl, responseTimeMs, error } = await fetchPage(
+  const { status, headers, data, redirectUrl, responseTimeMs, error } = await fetchWithRetry(
     url,
     config
   );
